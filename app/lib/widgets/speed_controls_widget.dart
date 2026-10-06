@@ -34,7 +34,7 @@ class _SpeedControlsWidgetState extends State<SpeedControlsWidget> {
         Expanded(
           flex: 2,
           child: _hold(
-            label: "▲ FWD",
+            label: "FORWARD",
             active: _fwd,
             base: AppTheme.kDim,
             activeFill: AppTheme.kGo,
@@ -53,7 +53,7 @@ class _SpeedControlsWidgetState extends State<SpeedControlsWidget> {
         Expanded(
           flex: 2,
           child: _hold(
-            label: "▼ REV",
+            label: "REVERSE",
             active: _rev,
             base: AppTheme.kDim,
             activeFill: AppTheme.kRev,
@@ -83,7 +83,7 @@ class _SpeedControlsWidgetState extends State<SpeedControlsWidget> {
               child: Center(
                 child: FittedBox(
                   child: Text(
-                    "■ STOP",
+                    "STOP",
                     style: AppTheme.labelUi(13, color: AppTheme.kTextPri, weight: FontWeight.w700),
                   ),
                 ),

@@ -29,9 +29,6 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
   late final TextEditingController _portController;
   late final FocusNode _ipFocusNode;
 
-  static const int _autoRevealAfterSec = 8;
-  bool _showManual = false;
-  Timer? _revealTimer;
   int _ellipsisTick = 0;
   Timer? _ellipsisTimer;
 
@@ -46,7 +43,6 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
         AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
     _scanController =
         AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
-    _startRevealTimer();
     _ellipsisTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
       if (mounted) {
         setState(() => _ellipsisTick = (_ellipsisTick + 1) % 4);
@@ -95,18 +91,8 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
     unawaited(ref.read(connectionProvider.notifier).connect(nextHost, next.port));
   }
 
-  void _startRevealTimer() {
-    _revealTimer?.cancel();
-    _revealTimer = Timer(const Duration(seconds: _autoRevealAfterSec), () {
-      if (mounted) {
-        setState(() => _showManual = true);
-      }
-    });
-  }
-
   @override
   void dispose() {
-    _revealTimer?.cancel();
     _ellipsisTimer?.cancel();
     _controller.dispose();
     _scanController.dispose();
@@ -121,10 +107,6 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
     final int port = int.tryParse(_portController.text.trim()) ?? 8080;
     ref.read(settingsProvider.notifier).update(ref.read(settingsProvider).copyWith(ip: ip, port: port));
     ref.read(connectionProvider.notifier).connect(ip, port);
-    setState(() {
-      _showManual = false;
-    });
-    _startRevealTimer();
   }
 
   String _modeFromHost(String host) {
@@ -212,8 +194,14 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                         style: AppTheme.monoData(11, color: AppTheme.kTextSec),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    if (isFailed || _showManual) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text(
+                      "Join Wi-Fi CartRobot_Setup. The app keeps retrying if the link drops.",
+                      textAlign: TextAlign.center,
+                      style: AppTheme.monoData(11, color: AppTheme.kTextPri),
+                    ),
+                    const SizedBox(height: 12),
+                    ...<Widget>[
                       Row(
                         children: <Widget>[
                           Expanded(
@@ -282,14 +270,6 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    ] else ...<Widget>[
-                      TextButton(
-                        onPressed: () => setState(() => _showManual = true),
-                        child: Text(
-                          "Enter IP manually",
-                          style: AppTheme.labelUi(11, color: AppTheme.kTextSec),
                         ),
                       ),
                     ],

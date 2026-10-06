@@ -128,9 +128,9 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
                     Expanded(
                       child: Row(
                         children: <Widget>[
-                          Expanded(child: _gridBtn("[● REC]", s.canRecord || s.state == RouteState.recording, AppTheme.kRecord, widget.onRecordToggle)),
+                          Expanded(child: _gridBtn(s.state == RouteState.recording ? "STOP REC" : "RECORD", s.canRecord || s.state == RouteState.recording, AppTheme.kRecord, widget.onRecordToggle)),
                           const SizedBox(width: 4),
-                          Expanded(child: _gridBtn("[■ STOP]", s.canStop, AppTheme.kStop, widget.onStop)),
+                          Expanded(child: _gridBtn("STOP", s.canStop, AppTheme.kStop, widget.onStop)),
                         ],
                       ),
                     ),
@@ -138,16 +138,16 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
                     Expanded(
                       child: Row(
                         children: <Widget>[
-                          Expanded(child: _gridBtn("[▶ PLAY]", s.canPlay, AppTheme.kGo, widget.onPlayback)),
+                          Expanded(child: _gridBtn("PLAY", s.canPlay, AppTheme.kGo, widget.onPlayback)),
                           const SizedBox(width: 4),
-                          Expanded(child: _gridBtn("[◀ RTN]", s.canReturn, AppTheme.kRev, widget.onReturn)),
+                          Expanded(child: _gridBtn("RETURN", s.canReturn, AppTheme.kRev, widget.onReturn)),
                         ],
                       ),
                     ),
                     const SizedBox(height: 4),
                     Expanded(
                       child: _gridBtn(
-                        "[✕ CLR MEM]",
+                        "CLEAR ROUTE",
                         s.canClearMemory,
                         AppTheme.kStop,
                         widget.onClearMemory,

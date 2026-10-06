@@ -34,7 +34,7 @@ static constexpr uint8_t WIFI_AP_MASK_D = 0;
 // ---------------------------------------------------------------------------
 static constexpr uint16_t WEBSOCKET_PORT = 8080;
 static constexpr uint32_t TELEMETRY_INTERVAL_MS = 100;
-static constexpr uint32_t WATCHDOG_NO_MESSAGE_MS = 3000;
+static constexpr uint32_t WATCHDOG_NO_MESSAGE_MS = 8000;
 
 // ---------------------------------------------------------------------------
 // Pins — BTS7960
@@ -72,7 +72,9 @@ static constexpr int PIN_ULTRASONIC_ECHO = 23;
 static constexpr int PIN_POT_ADC = 34;
 
 // ---------------------------------------------------------------------------
-// Pins — buttons
+// Pins — buttons (active-low).
+// Press shorts the pin to GND. A 10k pull-up goes to 3.3V (not 5V).
+// GPIO35 is input-only and has no internal pull-up, so the external resistor is required.
 // ---------------------------------------------------------------------------
 static constexpr int PIN_BUTTON_DRIVE_ENABLE = 33;
 static constexpr int PIN_BUTTON_AUTO_MODE = 35;

@@ -1,6 +1,7 @@
 // firmware/src/main.cpp
 #include <Arduino.h>
 #include <math.h>
+#include <stdio.h>
 
 #include "auto_mode.h"
 #include "board_menu.h"
@@ -29,6 +30,20 @@ static uint32_t s_btn1LastChangeMs = 0;
 static bool s_btn1Stable = true;
 
 static uint32_t s_fwdPctWindowStart = 0;
+
+static char s_notice1[17];
+static char s_notice2[17];
+static uint32_t s_noticeUntilMs = 0;
+
+static void lcdNotice(const char *line1, const char *line2) {
+  snprintf(s_notice1, sizeof(s_notice1), "%s", line1);
+  snprintf(s_notice2, sizeof(s_notice2), "%s", line2);
+  s_noticeUntilMs = millis() + 1800;
+}
+
+static bool lcdNoticeActive(uint32_t now) {
+  return s_noticeUntilMs != 0 && static_cast<int32_t>(s_noticeUntilMs - now) > 0;
+}
 
 static float readPotSensitivity() {
   if (s_potCount < POT_ADC_SAMPLES) {
@@ -71,8 +86,10 @@ static void onButton1Pressed() {
     return;
   }
   g_state.motorEnabled = !g_state.motorEnabled;
-  Serial.printf("[BTN] enable -> %u\n", g_state.motorEnabled ? 1U : 0U);
+  const bool on = g_state.motorEnabled;
+  Serial.printf("[BTN] enable -> %u\n", on ? 1U : 0U);
   giveStateMutex();
+  lcdNotice(on ? "ENABLE ON" : "ENABLE OFF", "BTN1 pressed");
 }
 
 static void onButton2Pressed() {
@@ -83,8 +100,10 @@ static void onButton2Pressed() {
   if (g_state.autoMode) {
     g_state.pendingRoute = PendingRouteAction::Stop;
   }
-  Serial.printf("[BTN] auto -> %u\n", g_state.autoMode ? 1U : 0U);
+  const bool on = g_state.autoMode;
+  Serial.printf("[BTN] auto -> %u\n", on ? 1U : 0U);
   giveStateMutex();
+  lcdNotice(on ? "AUTO ON" : "AUTO OFF", "BTN2 pressed");
 }
 
 static uint8_t scaleSteerPwm(uint8_t raw, float sensitivity) {
@@ -378,7 +397,9 @@ static void taskControlCore1(void *param) {
     }
 
     const RouteFsm rfsm = routeGetState();
-    if (rfsm == RouteFsm::Recording) {
+    if (lcdNoticeActive(now)) {
+      displayShowMenu(s_notice1, s_notice2);
+    } else if (rfsm == RouteFsm::Recording) {
       displayShowRecording(routeGetTotalSteps());
     } else if (rfsm == RouteFsm::Playing) {
       displayShowPlayback(routeGetCurrentIndex(), routeGetTotalSteps(), distCm, false);
@@ -388,7 +409,7 @@ static void taskControlCore1(void *param) {
       displayShowAuto(distCm, autoModeGetFsm());
     } else {
       displayShowNormal(scaleSteerPwm(wsSteerPwm, sensitivity), wsDrive, distCm, sensitivity,
-                      wsClients > 0);
+                        wsClients > 0, motorEnabled, autoMode);
     }
 
     displayUpdate();
@@ -432,7 +453,8 @@ void setup() {
   autoModeInit();
 
   pinMode(PIN_BUTTON_DRIVE_ENABLE, INPUT_PULLUP);
-  pinMode(PIN_BUTTON_AUTO_MODE, INPUT_PULLUP);
+  // GPIO35 cannot use the internal pull-up; the 10k to 3.3V does that job.
+  pinMode(PIN_BUTTON_AUTO_MODE, INPUT);
   boardMenuInit();
 
   xTaskCreatePinnedToCore(taskWebCore0, "web_ws", 4096, nullptr, 3, nullptr, 0);

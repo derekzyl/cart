@@ -35,7 +35,7 @@ class EnableToggleWidget extends StatelessWidget {
           child: Center(
             child: FittedBox(
               child: Text(
-                enabled ? "◉ ENABLED" : "◎ DISABLED",
+                enabled ? "MOTORS ON" : "MOTORS OFF",
                 style: AppTheme.labelUi(13,
                     color: enabled ? AppTheme.kGo : AppTheme.kStop, weight: FontWeight.w700),
               ),

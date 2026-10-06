@@ -253,19 +253,27 @@ static const char *driveTag(DriveCmd d) {
 }
 
 void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sensitivity,
-                       bool wsConnected) {
-  if (!wsConnected) {
-    requestDrawWifiSummary();
-    return;
-  }
+                       bool wsConnected, bool motorEnabled, bool autoMode) {
+  (void)steerPwm;
+  (void)sensitivity;
   char l1[17];
   char l2[17];
-  snprintf(l1, sizeof(l1), "SPD:%03u  %s", static_cast<unsigned>(steerPwm), driveTag(drive));
-  if (distCm >= 0.0f && distCm < 400.0f) {
-    snprintf(l2, sizeof(l2), "Dst:%02.0fcm Sn:%.1f", static_cast<double>(distCm),
-             static_cast<double>(sensitivity));
+  // 16-column line: button results stay visible after the press flash.
+  snprintf(l1, sizeof(l1), "E:%s A:%s %s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF",
+           driveTag(drive));
+  if (!wsConnected) {
+    webserverRefreshRobotIp();
+    const IPAddress ip = webserverRobotIp();
+    const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
+    if (haveIp) {
+      snprintf(l2, sizeof(l2), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+    } else {
+      snprintf(l2, sizeof(l2), "No link");
+    }
+  } else if (distCm >= 0.0f && distCm < 400.0f) {
+    snprintf(l2, sizeof(l2), "Dst:%3.0f cm", static_cast<double>(distCm));
   } else {
-    snprintf(l2, sizeof(l2), "Dst:-- Sn:%.1f", static_cast<double>(sensitivity));
+    snprintf(l2, sizeof(l2), "Dst: -- cm");
   }
   requestDraw(l1, l2);
 }

@@ -58,7 +58,7 @@ class _AutoToggleWidgetState extends State<AutoToggleWidget> with SingleTickerPr
             child: Center(
               child: FittedBox(
                 child: Text(
-                  "◈ AUTO",
+                  widget.enabled ? "AUTO ON" : "AUTO OFF",
                   style: AppTheme.labelUi(12,
                       color: widget.enabled ? AppTheme.kWarn : AppTheme.kTextSec, weight: FontWeight.w600),
                 ),

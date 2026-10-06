@@ -87,7 +87,7 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                   child: CustomPaint(painter: HudGridPainter()),
                 ),
                 Positioned(
-                  top: 28,
+                  top: 40,
                   left: 0,
                   right: 0,
                   bottom: 0,
@@ -95,7 +95,7 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
                       Expanded(
-                        flex: 26,
+                        flex: 34,
                         child: _panelPad(
                           child: JoystickWidget(
                             rateHz: settings.commandRateHz,
@@ -110,20 +110,75 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                       ),
                       const SizedBox(width: 2),
                       Expanded(
-                        flex: 28,
+                        flex: 24,
                         child: _panelPad(
-                          child: TelemetryPanelWidget(telemetry: telemetry),
+                          child: Column(
+                            children: <Widget>[
+                              Expanded(
+                                flex: 2,
+                                child: EnableToggleWidget(
+                                  enabled: controls.enabled,
+                                  onTap: () async {
+                                    await controlNotifier.heavyHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.enable(!controls.enabled));
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Expanded(
+                                flex: 2,
+                                child: AutoToggleWidget(
+                                  enabled: controls.auto,
+                                  onTap: () async {
+                                    await controlNotifier.heavyHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.auto(!controls.auto));
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Expanded(
+                                flex: 7,
+                                child: SpeedControlsWidget(
+                                  onFwdDown: () async {
+                                    await controlNotifier.heavyHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.move("fwd"));
+                                  },
+                                  onFwdUp: () async {
+                                    await controlNotifier.lightHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.move("stop"));
+                                  },
+                                  onRevDown: () async {
+                                    await controlNotifier.heavyHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.move("rev"));
+                                  },
+                                  onRevUp: () async {
+                                    await controlNotifier.lightHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.move("stop"));
+                                  },
+                                  onStop: () async {
+                                    await controlNotifier.heavyHaptic();
+                                    controlNotifier.sendCommand(RobotCommands.move("stop"));
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 2),
                       Expanded(
-                        flex: 26,
+                        flex: 42,
                         child: _panelPad(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
                               Expanded(
-                                flex: 6,
+                                flex: 5,
+                                child: TelemetryPanelWidget(telemetry: telemetry),
+                              ),
+                              Container(height: 1, color: AppTheme.kBorder.withValues(alpha: 0.6)),
+                              Expanded(
+                                flex: 5,
                                 child: RoutePanelWidget(
                                   state: route,
                                   onRecordToggle: () async {
@@ -152,7 +207,7 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                               ),
                               Container(height: 1, color: AppTheme.kBorder.withValues(alpha: 0.6)),
                               Expanded(
-                                flex: 4,
+                                flex: 3,
                                 child: LedBuzzerControlsWidget(
                                   navLeds: controls.navLeds,
                                   headlight: controls.headlight,
@@ -161,63 +216,6 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                   onNavLeds: (bool v) => controlNotifier.sendCommand(RobotCommands.ledsNav(v)),
                                   onHeadlight: (bool v) => controlNotifier.sendCommand(RobotCommands.headlight(v)),
                                   onBuzzerMuted: (bool v) => controlNotifier.sendCommand(RobotCommands.buzzerMute(v)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Expanded(
-                        flex: 20,
-                        child: _panelPad(
-                          child: Column(
-                            children: <Widget>[
-                              Expanded(
-                                flex: 2,
-                                child: EnableToggleWidget(
-                                  enabled: controls.enabled,
-                                  onTap: () async {
-                                    await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.enable(!controls.enabled));
-                                  },
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Expanded(
-                                flex: 1,
-                                child: AutoToggleWidget(
-                                  enabled: controls.auto,
-                                  onTap: () async {
-                                    await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.auto(!controls.auto));
-                                  },
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Expanded(
-                                flex: 5,
-                                child: SpeedControlsWidget(
-                                  onFwdDown: () async {
-                                    await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.move("fwd"));
-                                  },
-                                  onFwdUp: () async {
-                                    await controlNotifier.lightHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.move("stop"));
-                                  },
-                                  onRevDown: () async {
-                                    await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.move("rev"));
-                                  },
-                                  onRevUp: () async {
-                                    await controlNotifier.lightHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.move("stop"));
-                                  },
-                                  onStop: () async {
-                                    await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.move("stop"));
-                                  },
                                 ),
                               ),
                             ],
@@ -235,26 +233,7 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                     connection: connection,
                     uptimeText: _uptime(telemetry.uptimeS),
                     pulse: _connPulse,
-                  ),
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: GestureDetector(
-                    onVerticalDragStart: (_) => _openSettings(),
-                    onTap: _openSettings,
-                    behavior: HitTestBehavior.translucent,
-                    child: Container(
-                      height: 20,
-                      alignment: Alignment.topCenter,
-                      color: Colors.transparent,
-                      child: Container(
-                        width: 32,
-                        height: 4,
-                        color: AppTheme.kAccent.withValues(alpha: 0.85),
-                      ),
-                    ),
+                    onSettings: _openSettings,
                   ),
                 ),
               ],
@@ -284,11 +263,13 @@ class _TopStatusBar extends StatelessWidget {
     required this.connection,
     required this.uptimeText,
     required this.pulse,
+    required this.onSettings,
   });
 
   final ConnectionUiState connection;
   final String uptimeText;
   final Animation<double> pulse;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +288,7 @@ class _TopStatusBar extends StatelessWidget {
                 : AppTheme.kStop;
 
     return Container(
-      height: 28,
+      height: 40,
       decoration: BoxDecoration(
         color: AppTheme.kSurface.withValues(alpha: 0.92),
         border: Border(
@@ -373,6 +354,14 @@ class _TopStatusBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
+                IconButton(
+                  tooltip: "Connection settings",
+                  onPressed: onSettings,
+                  icon: const Icon(Icons.settings, size: 18, color: AppTheme.kAccent),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                const SizedBox(width: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(

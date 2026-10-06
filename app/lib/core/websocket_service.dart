@@ -53,6 +53,7 @@ class WebSocketService {
   int _reconnectSeconds = 2;
   String _host = "192.168.4.1";
   int _port = 8080;
+  DateTime _lastRx = DateTime.fromMillisecondsSinceEpoch(0);
 
   static bool _isNetworkUnreachable(Object? e) {
     if (e == null) return false;
@@ -79,30 +80,18 @@ class WebSocketService {
     _reconnectTimer?.cancel();
     await _cleanupChannel();
     _log("connect requested host=$_host port=$_port");
-    final List<String> localIps = await _logLocalNetworkState();
-    if (_host == "192.168.4.1" &&
-        !localIps.any((String ip) => ip.startsWith("192.168.4."))) {
-      final String msg =
-          "AP mode target is 192.168.4.1 but phone is not on CartRobot_Setup "
-          "(need local IP 192.168.4.x).";
-      _log(msg);
-      if (!_errorController.isClosed) _errorController.add(msg);
-      _setStatus(SocketStatus.disconnected);
-      return;
-    }
+    // Android often returns no interfaces to untrusted apps. That is not proof
+    // the phone is off the robot hotspot, so never abort the connection here.
+    unawaited(_logLocalNetworkState());
     await _connectInternal();
   }
 
   Future<void> _connectInternal() async {
     if (_manualDisconnect) return;
     _setStatus(SocketStatus.connecting);
-    final bool isApHost = _host == "192.168.4.1";
     final List<Uri> candidates = <Uri>[
       Uri.parse("ws://$_host:$_port/ws"),
       Uri.parse("ws://$_host:$_port/"),
-      // Only try AP fallback automatically when user is already targeting AP mode.
-      if (isApHost) Uri.parse("ws://192.168.4.1:$_port/ws"),
-      if (isApHost) Uri.parse("ws://192.168.4.1:$_port/"),
     ];
     try {
       await _cleanupChannel();
@@ -131,6 +120,7 @@ class WebSocketService {
             cancelOnError: true,
           );
           _log("connected ${uri.toString()}");
+          _lastRx = DateTime.now();
           _setStatus(SocketStatus.connected);
           _errorController.add(null);
           _startPing();
@@ -164,8 +154,8 @@ class WebSocketService {
 
   void _bumpBackoffIfUnreachable(Object e) {
     if (_isNetworkUnreachable(e)) {
-      _reconnectSeconds = _reconnectSeconds.clamp(15, 90);
-      _log("network unreachable — backoff ${_reconnectSeconds}s");
+      _reconnectSeconds = 3;
+      _log("network unreachable — retry in ${_reconnectSeconds}s");
     }
   }
 
@@ -191,7 +181,10 @@ class WebSocketService {
   void _handleMessage(dynamic data) {
     final String msg = data?.toString() ?? "";
     if (msg.isEmpty) return;
-    _log("rx: $msg");
+    _lastRx = DateTime.now();
+    if (msg.contains('"pong"') || msg.length < 48) {
+      _log("rx: $msg");
+    }
     _messageController.add(msg);
     try {
       final dynamic decoded = jsonDecode(msg);
@@ -217,8 +210,14 @@ class WebSocketService {
 
   void _startPing() {
     _pingTimer?.cancel();
+    _lastRx = DateTime.now();
     _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (currentStatus != SocketStatus.connected) return;
+      if (DateTime.now().difference(_lastRx) > const Duration(seconds: 6)) {
+        _log("no data from robot for 6s — reconnecting");
+        _handleDisconnect();
+        return;
+      }
       _lastPingSent = DateTime.now();
       send(<String, dynamic>{"cmd": "ping"});
     });
@@ -276,7 +275,7 @@ class WebSocketService {
     if (_manualDisconnect) return;
 
     _reconnectTimer?.cancel();
-    final int wait = _reconnectSeconds.clamp(2, 90);
+    final int wait = _reconnectSeconds.clamp(2, 8);
     _log("disconnected, retry in ${wait}s");
     if (!_errorController.isClosed) {
       _errorController.add(
@@ -287,7 +286,7 @@ class WebSocketService {
     _reconnectTimer = Timer(Duration(seconds: wait), () {
       unawaited(_connectInternal());
     });
-    _reconnectSeconds = (_reconnectSeconds * 2).clamp(2, 90);
+    _reconnectSeconds = (_reconnectSeconds * 2).clamp(2, 8);
   }
 
   /// Tear down socket. Use [publishStatus] false when immediately calling [connect] again

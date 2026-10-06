@@ -8,6 +8,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 #include <cstring>
 
@@ -302,6 +303,8 @@ void webserverInit() {
 
     if (apOk) {
       s_robotIp = WiFi.softAPIP();
+      WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
       Serial.printf("[WiFi] SoftAP \"%s\" IP %s  port %u\n", WIFI_AP_SSID,
                     s_robotIp.toString().c_str(), static_cast<unsigned>(WEBSOCKET_PORT));
     } else {
@@ -357,6 +360,7 @@ void webserverInit() {
 
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
       s_wifiUsingSta = true;
       s_robotIp = WiFi.localIP();
       Serial.printf("[WiFi] STA \"%s\" IP %s\n", WIFI_STA_SSID,
