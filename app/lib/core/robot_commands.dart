@@ -15,4 +15,8 @@ class RobotCommands {
   static Map<String, dynamic> route(String action) =>
       <String, dynamic>{"cmd": "route", "action": action};
   static Map<String, dynamic> ping() => <String, dynamic>{"cmd": "ping"};
+  static Map<String, dynamic> wifiConnect(String ssid, String password) =>
+      <String, dynamic>{"cmd": "wifi_connect", "ssid": ssid, "password": password};
+  static Map<String, dynamic> wifiScan() => <String, dynamic>{"cmd": "wifi_scan"};
+  static Map<String, dynamic> wifiReset() => <String, dynamic>{"cmd": "wifi_reset"};
 }

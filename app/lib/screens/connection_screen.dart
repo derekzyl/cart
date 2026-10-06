@@ -11,6 +11,7 @@ import "../providers/settings_provider.dart";
 import "../theme/app_theme.dart";
 import "../widgets/connection_radar_widget.dart";
 import "../widgets/shared/clipped_corner_box.dart";
+import "../widgets/wifi_setup_sheet.dart";
 
 class ConnectionScreen extends ConsumerStatefulWidget {
   const ConnectionScreen({super.key});
@@ -109,6 +110,13 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
     ref.read(connectionProvider.notifier).connect(ip, port);
   }
 
+  void _setHostAndConnect(String host) {
+    _ipController.text = host;
+    final int port = int.tryParse(_portController.text.trim()) ?? 8080;
+    ref.read(settingsProvider.notifier).update(ref.read(settingsProvider).copyWith(ip: host, port: port));
+    ref.read(connectionProvider.notifier).connect(host, port);
+  }
+
   String _modeFromHost(String host) {
     final String h = host.trim().toLowerCase();
     if (h == _robotApIp) {
@@ -200,6 +208,26 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                       textAlign: TextAlign.center,
                       style: AppTheme.monoData(11, color: AppTheme.kTextPri),
                     ),
+                    const SizedBox(height: 10),
+                    // Preset Quick Pickers
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        _PresetChip(
+                          label: "Robot Hotspot",
+                          sub: "192.168.4.1",
+                          isActive: _ipController.text.trim() == "192.168.4.1",
+                          onTap: () => _setHostAndConnect("192.168.4.1"),
+                        ),
+                        const SizedBox(width: 8),
+                        _PresetChip(
+                          label: "mDNS Local",
+                          sub: "cart-robot.local",
+                          isActive: _ipController.text.trim() == "cart-robot.local",
+                          onTap: () => _setHostAndConnect("cart-robot.local"),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 12),
                     ...<Widget>[
                       Row(
@@ -221,7 +249,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                                 decoration: InputDecoration(
                                   border: InputBorder.none,
                                   isDense: true,
-                                  hintText: "10.164.80.60",
+                                  hintText: "192.168.4.1",
                                   hintStyle: AppTheme.labelUi(11, color: AppTheme.kTextSec),
                                 ),
                                 onSubmitted: (_) => _connect(),
@@ -267,6 +295,32 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                               child: Text(
                                 "CONNECT",
                                 style: AppTheme.labelUi(13, color: AppTheme.kAccent, weight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: GestureDetector(
+                          onTap: () => WifiSetupSheet.show(context),
+                          child: ClippedCornerBox(
+                            cutSize: 6,
+                            backgroundColor: AppTheme.kPanel,
+                            borderColor: AppTheme.kAccent.withValues(alpha: 0.6),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            child: Center(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: <Widget>[
+                                  const Icon(Icons.wifi_rounded, color: AppTheme.kAccent, size: 16),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "ROBOT WI-FI SETUP / SWITCH NETWORK",
+                                    style: AppTheme.labelUi(11, color: AppTheme.kAccent, weight: FontWeight.w700),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -339,6 +393,46 @@ class _StatusChip extends StatelessWidget {
       borderColor: color,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       child: Text(text, style: AppTheme.labelUi(11, color: color, weight: FontWeight.w600)),
+    );
+  }
+}
+
+class _PresetChip extends StatelessWidget {
+  const _PresetChip({
+    required this.label,
+    required this.sub,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  final String label;
+  final String sub;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClippedCornerBox(
+        cutSize: 4,
+        backgroundColor: isActive ? AppTheme.kAccent.withValues(alpha: 0.15) : AppTheme.kPanel,
+        borderColor: isActive ? AppTheme.kAccent : AppTheme.kBorder,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Column(
+          children: <Widget>[
+            Text(
+              label,
+              style: AppTheme.labelUi(10,
+                  color: isActive ? AppTheme.kAccent : AppTheme.kTextPri, weight: FontWeight.w600),
+            ),
+            Text(
+              sub,
+              style: AppTheme.monoData(9, color: isActive ? AppTheme.kAccent : AppTheme.kTextSec),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

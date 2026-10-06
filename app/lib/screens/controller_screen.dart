@@ -19,6 +19,7 @@ import "../widgets/shared/clipped_corner_box.dart";
 import "../widgets/shared/hud_grid_painter.dart";
 import "../widgets/speed_controls_widget.dart";
 import "../widgets/telemetry_panel_widget.dart";
+import "../widgets/wifi_setup_sheet.dart";
 
 class ControllerScreen extends ConsumerStatefulWidget {
   const ControllerScreen({super.key});
@@ -57,6 +58,10 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
     }
     final ControlSettings s = ref.read(settingsProvider);
     ref.read(connectionProvider.notifier).connect(s.ip, s.port);
+  }
+
+  void _openWifiSetup() {
+    WifiSetupSheet.show(context);
   }
 
   String _uptime(int s) {
@@ -231,9 +236,11 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                   right: 0,
                   child: _TopStatusBar(
                     connection: connection,
+                    telemetry: telemetry,
                     uptimeText: _uptime(telemetry.uptimeS),
                     pulse: _connPulse,
                     onSettings: _openSettings,
+                    onWifiSetup: _openWifiSetup,
                   ),
                 ),
               ],
@@ -261,15 +268,19 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
 class _TopStatusBar extends StatelessWidget {
   const _TopStatusBar({
     required this.connection,
+    required this.telemetry,
     required this.uptimeText,
     required this.pulse,
     required this.onSettings,
+    required this.onWifiSetup,
   });
 
   final ConnectionUiState connection;
+  final Telemetry telemetry;
   final String uptimeText;
   final Animation<double> pulse;
   final VoidCallback onSettings;
+  final VoidCallback onWifiSetup;
 
   @override
   Widget build(BuildContext context) {
@@ -322,6 +333,38 @@ class _TopStatusBar extends StatelessWidget {
             },
           ),
           const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onWifiSetup,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: telemetry.wifiMode == "sta" ? AppTheme.kAccent : AppTheme.kWarn,
+                ),
+                color: (telemetry.wifiMode == "sta" ? AppTheme.kAccent : AppTheme.kWarn).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(
+                    Icons.wifi_rounded,
+                    size: 11,
+                    color: telemetry.wifiMode == "sta" ? AppTheme.kAccent : AppTheme.kWarn,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    telemetry.wifiMode == "sta" ? "STA ${telemetry.ip}" : "AP 192.168.4.1",
+                    style: AppTheme.monoData(
+                      9,
+                      color: telemetry.wifiMode == "sta" ? AppTheme.kAccent : AppTheme.kWarn,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
           Expanded(
             flex: 4,
             child: FittedBox(
@@ -343,7 +386,7 @@ class _TopStatusBar extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 4,
+            flex: 5,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
@@ -353,7 +396,15 @@ class _TopStatusBar extends StatelessWidget {
                     style: AppTheme.monoData(10, color: AppTheme.kTextPri),
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: "Wi-Fi setup",
+                  onPressed: onWifiSetup,
+                  icon: const Icon(Icons.wifi_rounded, size: 18, color: AppTheme.kAccent),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                const SizedBox(width: 2),
                 IconButton(
                   tooltip: "Connection settings",
                   onPressed: onSettings,

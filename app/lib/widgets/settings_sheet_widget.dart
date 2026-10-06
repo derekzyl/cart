@@ -5,6 +5,7 @@ import "../providers/connection_provider.dart";
 import "../providers/settings_provider.dart";
 import "../theme/app_theme.dart";
 import "shared/clipped_corner_box.dart";
+import "wifi_setup_sheet.dart";
 
 class SettingsSheetWidget extends ConsumerStatefulWidget {
   const SettingsSheetWidget({super.key});
@@ -160,7 +161,38 @@ class _SettingsSheetWidgetState extends ConsumerState<SettingsSheetWidget> {
                 const SizedBox(height: 16),
                 const Divider(height: 1, color: AppTheme.kBorder),
                 const SizedBox(height: 12),
-                Text("NETWORK", style: AppTheme.labelUi(11, color: AppTheme.kTextSec)),
+                Text("ROBOT WI-FI CONFIGURATION", style: AppTheme.labelUi(11, color: AppTheme.kTextSec)),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    WifiSetupSheet.show(context);
+                  },
+                  child: ClippedCornerBox(
+                    cutSize: 5,
+                    backgroundColor: AppTheme.kSurface,
+                    borderColor: AppTheme.kAccent,
+                    topAccentColor: AppTheme.kAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    child: Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: <Widget>[
+                          const Icon(Icons.wifi_rounded, color: AppTheme.kAccent, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            "CONFIGURE WI-FI / SWITCH NETWORK",
+                            style: AppTheme.labelUi(11, color: AppTheme.kAccent, weight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1, color: AppTheme.kBorder),
+                const SizedBox(height: 12),
+                Text("NETWORK TARGET", style: AppTheme.labelUi(11, color: AppTheme.kTextSec)),
                 const SizedBox(height: 8),
                 ClippedCornerBox(
                   cutSize: 5,

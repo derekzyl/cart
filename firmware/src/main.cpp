@@ -65,6 +65,9 @@ static float readPotSensitivity() {
   return STEER_SENSITIVITY_MIN + t * (STEER_SENSITIVITY_MAX - STEER_SENSITIVITY_MIN);
 }
 
+static uint32_t s_btn1DownAt = 0;
+static bool s_btn1HoldArmed = false;
+
 static void serviceButton(int pin, bool &lastRaw, uint32_t &lastChangeMs, bool &stable,
                           void (*onPressed)()) {
   const bool raw = digitalRead(pin) == HIGH;
@@ -77,6 +80,39 @@ static void serviceButton(int pin, bool &lastRaw, uint32_t &lastChangeMs, bool &
     stable = raw;
     if (!stable) {
       onPressed();
+    }
+  }
+}
+
+static void onButton1Pressed();
+
+static void serviceButton1(uint32_t now) {
+  const bool raw = digitalRead(PIN_BUTTON_DRIVE_ENABLE) == HIGH;
+  if (raw != s_btn1LastRaw) {
+    s_btn1LastRaw = raw;
+    s_btn1LastChangeMs = now;
+  }
+  if ((now - s_btn1LastChangeMs) >= BUTTON_DEBOUNCE_MS && raw != s_btn1Stable) {
+    s_btn1Stable = raw;
+    if (!s_btn1Stable) {
+      s_btn1DownAt = now;
+      s_btn1HoldArmed = false;
+    } else {
+      if (s_btn1DownAt != 0 && !s_btn1HoldArmed) {
+        onButton1Pressed();
+      }
+      s_btn1DownAt = 0;
+      s_btn1HoldArmed = false;
+    }
+  }
+
+  // Check 4-second hold on BTN1 outside menu to reset to hotspot
+  if (!s_btn1Stable && s_btn1DownAt != 0 && !s_btn1HoldArmed) {
+    if ((now - s_btn1DownAt) >= 4000) {
+      s_btn1HoldArmed = true;
+      Serial.println("[BTN1] 4s long hold: Resetting to Hotspot!");
+      webserverResetToHotspot();
+      lcdNotice("HOTSPOT RESET", "BTN1 long hold");
     }
   }
 }
@@ -236,8 +272,7 @@ static void taskControlCore1(void *param) {
 
     boardMenuTick(now, onButton2Pressed);
     if (!boardMenuIsActive()) {
-      serviceButton(PIN_BUTTON_DRIVE_ENABLE, s_btn1LastRaw, s_btn1LastChangeMs, s_btn1Stable,
-                    onButton1Pressed);
+      serviceButton1(now);
     }
 
     consumePendingRoute();

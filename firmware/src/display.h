@@ -13,6 +13,9 @@ void displayForceReinit();
 void displayAfterNetworkUp();
 void displayShowWaiting();
 void displayShowConnecting(const char *ssid, uint32_t elapsedMs, uint32_t timeoutMs);
+void displayShowWifiConnecting(const char *ssid);
+void displayShowWifiConnected(const char *ip, const char *ssid);
+void displayShowWifiResetHotspot();
 void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sensitivity,
                        bool wsConnected, bool motorEnabled, bool autoMode);
 void displayShowAuto(float distCm, AutoFsm autoState);

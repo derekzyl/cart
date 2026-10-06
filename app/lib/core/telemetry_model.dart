@@ -21,6 +21,9 @@ class Telemetry {
     required this.routeState,
     required this.routeStep,
     required this.routeTotal,
+    this.wifiMode = "ap",
+    this.wifiSsid = "CartRobot_Setup",
+    this.ip = "192.168.4.1",
   });
 
   final int distCm;
@@ -38,6 +41,9 @@ class Telemetry {
   final RouteState routeState;
   final int routeStep;
   final int routeTotal;
+  final String wifiMode;
+  final String wifiSsid;
+  final String ip;
 
   static const Telemetry initial = Telemetry(
     distCm: 250,
@@ -55,6 +61,9 @@ class Telemetry {
     routeState: RouteState.idle,
     routeStep: 0,
     routeTotal: 0,
+    wifiMode: "ap",
+    wifiSsid: "CartRobot_Setup",
+    ip: "192.168.4.1",
   );
 
   static Telemetry? tryParse(String raw) {
@@ -105,6 +114,9 @@ class Telemetry {
       },
       routeStep: intVal(json["route_step"], 0).clamp(0, 500),
       routeTotal: intVal(json["route_total"], 0).clamp(0, 500),
+      wifiMode: "${json["wifi_mode"] ?? "ap"}",
+      wifiSsid: "${json["wifi_ssid"] ?? "CartRobot_Setup"}",
+      ip: "${json["ip"] ?? "192.168.4.1"}",
     );
   }
 }

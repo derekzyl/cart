@@ -86,19 +86,33 @@ Pin assignments are centralized in **`firmware/src/config.h`**. Typical groups:
 
 ## Networking: access point vs home Wi‑Fi
 
-Configured in **`firmware/src/config.h`**:
+The robot supports both **Soft AP (Hotspot)** mode and **Station (Shared Wi‑Fi)** mode with runtime provisioning saved in non-volatile flash memory (NVS via ESP32 `Preferences`):
 
-- **Soft AP (hotspot)**  
-  - Default SSID/password are defined (`WIFI_AP_SSID`, `WIFI_AP_PASSWORD`).  
-  - Robot is usually at **`192.168.4.1`** (classic ESP32 AP addressing).  
-  - The phone joins this network and points the app at `192.168.4.1:8080`.
+### 1. Default Hotspot Mode (`CartRobot_Setup`)
+- On first boot (or after a reset), the robot broadcasts an access point: **`CartRobot_Setup`** (password `12345678`, or as set in `config.h`).
+- The robot is reachable at **`192.168.4.1:8080`**.
+- Connect your phone to this Wi-Fi network and open the app. The app connects to `192.168.4.1`.
 
-- **Station mode (STA)**  
-  - Set `WIFI_STA_SSID` / `WIFI_STA_PASSWORD` to join your router.  
-  - Use `WIFI_FORCE_STA_MODE` if you want STA-only behavior.  
-  - The app must use the **robot’s DHCP address** on your LAN (check router admin or serial logs), not `192.168.4.1`.
+### 2. Switching to Shared Wi‑Fi (In-App Provisioning)
+- Tap the **Wi‑Fi status chip / button** in the app (available on the Connection screen, Controller top bar, or Settings menu) to open **Wi‑Fi Setup**.
+- Tap **Scan Networks** to list available 2.4 GHz Wi‑Fi networks with signal strength bars.
+- Select your Wi‑Fi network, enter the password, and tap **Connect Robot to Wi‑Fi**.
+- The robot connects to your shared Wi‑Fi router while maintaining client communication, saves credentials into NVS, and obtains an IP via DHCP.
+- When connected, the app offers a one-tap **"Switch App to New IP & Reconnect"** button that automatically repoints the dashboard to the robot's new LAN IP.
 
-The Flutter service probes **`http://<host>:<port>/health`** and **`ws://<host>:<port>/ws`** (with fallbacks) to establish a session.
+### 3. LCD Display of IP Address
+- When the robot successfully joins the shared Wi‑Fi, the I2C LCD immediately displays a 10-second banner:
+  ```
+  NEW IP (WIFI):
+  192.168.x.y
+  ```
+- In normal operating mode, Line 2 of the 16x2 LCD rotates every 3 seconds between sensor distance (`DIST: 45cm`) and the active network IP (`STA 192.168.x.y` or `AP 192.168.4.1`), ensuring the operator can always check the IP directly on the robot hardware without opening a router admin console.
+
+### 4. Hardware Button Reset to Hotspot Mode (Recovery)
+If the shared Wi‑Fi is unavailable or the credentials change, you can instantly revert the robot back to Hotspot mode without a computer:
+- **Fast 4-Second Button Reset**: Press and hold **Button 1** (`PIN_BUTTON_DRIVE_ENABLE`) for **>= 4 seconds**. The buzzer will sound two confirmation beeps and the LCD will display `WIFI RESET -> HOTSPOT AP`. All stored Wi-Fi credentials in NVS are cleared and the robot immediately boots its standalone hotspot (`192.168.4.1`). *(Short press continues to toggle motor drive enable as usual).*
+- **LCD Menu Reset**: Press and hold **Button 2** (`PIN_BUTTON_AUTO_MODE`) for 3 seconds to open the Onboard Setup Menu. Item 1 is `1.RESET HOTSPOT`. Short-press Button 2 to execute the reset.
+- **In-App Reset**: Tapping "Reset Robot to Hotspot" in the Wi-Fi Setup sheet sends a reset command.
 
 ---
 
@@ -116,8 +130,11 @@ All commands are **JSON objects** with at least `"cmd": "<name>"`.
 | `leds` | `nav`: bool — nav LEDs; optional `headlight`: bool |
 | `buzzer` | `mute`: bool |
 | `route` | `action`: `record_start`, `record_stop`, `playback`, `playback_reverse`, `stop`, `clear` |
+| `wifi_scan` | Requests an async scan of 2.4 GHz networks; server replies with `wifi_scan_results`. |
+| `wifi_connect` | `ssid`: string, `pass`: string — connects ESP32 to shared Wi-Fi and persists in NVS. |
+| `wifi_reset` | Clears stored Wi-Fi credentials and switches back to SoftAP mode (`192.168.4.1`). |
 
-Telemetry is sent as JSON (fields such as distance, steering PWM, drive command, enabled/auto flags, `nav_leds`, route step/total, etc.—see `webserver.cpp` and `telemetry_model.dart` in the app).
+Telemetry is sent as JSON periodically (fields include `dist_cm`, `steering_pwm`, `drive_cmd`, `drive_enabled`, `auto_mode`, `nav_leds`, route step/total, `wifi_mode` ["ap"/"sta"], `wifi_ssid`, and `ip`).
 
 ---
 

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "webserver.h"
 
 static constexpr uint32_t kMenuEnterHoldMs = 3000;
 static constexpr uint32_t kShortPressMaxMs = 700;
@@ -13,7 +14,7 @@ static constexpr uint32_t kDebounceMs = 45;
 static bool s_inMenu = false;
 static uint8_t s_item = 0;
 
-enum class MenuItem : uint8_t { RestartEsp = 0, Exit, Count };
+enum class MenuItem : uint8_t { ResetHotspot = 0, RestartEsp, Exit, Count };
 static constexpr uint8_t kMenuCount = static_cast<uint8_t>(MenuItem::Count);
 
 static bool s_b2Stable = true;
@@ -61,12 +62,15 @@ void boardMenuGetLines(char line1[17], char line2[17]) {
   strncpy(line1, "SETUP MENU", 16);
   line1[16] = '\0';
   switch (static_cast<MenuItem>(s_item)) {
+    case MenuItem::ResetHotspot:
+      strncpy(line2, "1.RESET HOTSPOT", 16);
+      break;
     case MenuItem::RestartEsp:
-      strncpy(line2, "RESTART ESP?", 16);
+      strncpy(line2, "2.RESTART ESP?", 16);
       break;
     case MenuItem::Exit:
     default:
-      strncpy(line2, "EXIT MENU", 16);
+      strncpy(line2, "3.EXIT MENU", 16);
       break;
   }
   line2[16] = '\0';
@@ -87,6 +91,13 @@ void boardMenuTick(uint32_t now, void (*onAutoShortPress)()) {
     }
     if (b2Down && !s_menuPrevB2) {
       switch (static_cast<MenuItem>(s_item)) {
+        case MenuItem::ResetHotspot:
+          Serial.println("[MENU] reset hotspot");
+          webserverResetToHotspot();
+          s_inMenu = false;
+          s_menuEnterArmed = false;
+          s_ignoreNextB2Release = true;
+          break;
         case MenuItem::RestartEsp:
           Serial.println("[MENU] restart");
           delay(100);

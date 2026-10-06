@@ -10,3 +10,8 @@ void webserverBroadcastTelemetry();
 bool webserverWifiUsingSta();
 IPAddress webserverRobotIp();
 void webserverRefreshRobotIp();
+const char *webserverActiveSsid();
+
+void webserverConnectSta(const char *ssid, const char *password);
+void webserverResetToHotspot();
+void webserverScanWifi();

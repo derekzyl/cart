@@ -1,12 +1,14 @@
 // firmware/src/webserver.cpp
 #include "webserver.h"
 #include "config.h"
+#include "display.h"
 #include "route.h"
 
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
+#include <Preferences.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
 
@@ -18,6 +20,10 @@ static AsyncWebSocket s_wsPath("/ws");
 
 static bool s_wifiUsingSta = false;
 static IPAddress s_robotIp;
+static Preferences s_wifiPrefs;
+static char s_savedSsid[33] = "";
+static char s_savedPassword[65] = "";
+static bool s_hasSavedCredentials = false;
 
 static void wsTextAll(const char *payload) {
   s_wsRoot.textAll(payload);
@@ -30,6 +36,13 @@ bool webserverWifiUsingSta() {
 
 IPAddress webserverRobotIp() {
   return s_robotIp;
+}
+
+const char *webserverActiveSsid() {
+  if (s_wifiUsingSta && s_savedSsid[0] != '\0') {
+    return s_savedSsid;
+  }
+  return WIFI_AP_SSID;
 }
 
 void webserverRefreshRobotIp() {
@@ -46,6 +59,163 @@ void webserverRefreshRobotIp() {
       s_robotIp = ap;
     }
   }
+}
+
+void webserverConnectSta(const char *ssid, const char *password) {
+  if (ssid == nullptr || ssid[0] == '\0') {
+    Serial.println("[WiFi] Connect failed: empty SSID");
+    return;
+  }
+
+  Serial.printf("[WiFi] Connecting to shared WiFi: \"%s\"\n", ssid);
+  strncpy(s_savedSsid, ssid, sizeof(s_savedSsid) - 1);
+  s_savedSsid[sizeof(s_savedSsid) - 1] = '\0';
+  if (password != nullptr) {
+    strncpy(s_savedPassword, password, sizeof(s_savedPassword) - 1);
+    s_savedPassword[sizeof(s_savedPassword) - 1] = '\0';
+  } else {
+    s_savedPassword[0] = '\0';
+  }
+  s_hasSavedCredentials = true;
+
+  // Persist to NVS Preferences
+  s_wifiPrefs.begin("cart_wifi", false);
+  s_wifiPrefs.putString("sta_ssid", s_savedSsid);
+  s_wifiPrefs.putString("sta_pass", s_savedPassword);
+  s_wifiPrefs.putBool("configured", true);
+  s_wifiPrefs.end();
+
+  // Inform WS clients of connecting status
+  JsonDocument startDoc;
+  startDoc["cmd"] = "wifi_status";
+  startDoc["status"] = "connecting";
+  startDoc["ssid"] = s_savedSsid;
+  char startBuf[128];
+  serializeJson(startDoc, startBuf, sizeof(startBuf));
+  wsTextAll(startBuf);
+
+  // Show on LCD immediately
+  displayShowWifiConnecting(s_savedSsid);
+
+  // Maintain AP_STA mode so the client can stay connected during the transition
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.disconnect(false, false);
+  delay(50);
+  WiFi.begin(s_savedSsid, s_savedPassword[0] != '\0' ? s_savedPassword : nullptr);
+
+  const uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < WIFI_STA_CONNECT_TIMEOUT_MS) {
+    delay(50);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setSleep(false);
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    s_wifiUsingSta = true;
+    s_robotIp = WiFi.localIP();
+    Serial.printf("[WiFi] Connected to \"%s\"! IP: %s\n", s_savedSsid, s_robotIp.toString().c_str());
+
+    if (MDNS.begin("cart-robot")) {
+      MDNS.addService("ws", "tcp", WEBSOCKET_PORT);
+    }
+
+    displayShowWifiConnected(s_robotIp.toString().c_str(), s_savedSsid);
+
+    JsonDocument okDoc;
+    okDoc["cmd"] = "wifi_status";
+    okDoc["status"] = "connected";
+    okDoc["ip"] = s_robotIp.toString();
+    okDoc["ssid"] = s_savedSsid;
+    okDoc["mode"] = "sta";
+    char okBuf[192];
+    serializeJson(okDoc, okBuf, sizeof(okBuf));
+    wsTextAll(okBuf);
+  } else {
+    Serial.printf("[WiFi] Connection failed / timeout for \"%s\"\n", s_savedSsid);
+    s_wifiUsingSta = false;
+    s_robotIp = WiFi.softAPIP();
+    displayShowWifiReady();
+
+    JsonDocument failDoc;
+    failDoc["cmd"] = "wifi_status";
+    failDoc["status"] = "failed";
+    failDoc["error"] = "Connection timed out";
+    failDoc["ip"] = s_robotIp.toString();
+    failDoc["mode"] = "ap";
+    char failBuf[192];
+    serializeJson(failDoc, failBuf, sizeof(failBuf));
+    wsTextAll(failBuf);
+  }
+
+  if (takeStateMutex()) {
+    g_state.wifiReady = true;
+    giveStateMutex();
+  }
+}
+
+void webserverResetToHotspot() {
+  Serial.println("[WiFi] Reset to Hotspot requested");
+
+  // Clear Preferences
+  s_wifiPrefs.begin("cart_wifi", false);
+  s_wifiPrefs.clear();
+  s_wifiPrefs.end();
+
+  s_hasSavedCredentials = false;
+  s_savedSsid[0] = '\0';
+  s_savedPassword[0] = '\0';
+
+  WiFi.disconnect(true, false);
+  delay(50);
+
+  WiFi.mode(WIFI_AP_STA);
+  const IPAddress apLocalIp(WIFI_AP_IP_A, WIFI_AP_IP_B, WIFI_AP_IP_C, WIFI_AP_IP_D);
+  const IPAddress apGateway(WIFI_AP_IP_A, WIFI_AP_IP_B, WIFI_AP_IP_C, WIFI_AP_IP_D);
+  const IPAddress apSubnet(WIFI_AP_MASK_A, WIFI_AP_MASK_B, WIFI_AP_MASK_C, WIFI_AP_MASK_D);
+  WiFi.softAPConfig(apLocalIp, apGateway, apSubnet);
+  WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD, 1, 0, 4);
+
+  s_wifiUsingSta = false;
+  s_robotIp = WiFi.softAPIP();
+
+  Serial.printf("[WiFi] SoftAP restarted \"%s\" IP %s\n", WIFI_AP_SSID, s_robotIp.toString().c_str());
+
+  displayShowWifiResetHotspot();
+
+  JsonDocument doc;
+  doc["cmd"] = "wifi_status";
+  doc["status"] = "reset";
+  doc["ip"] = s_robotIp.toString();
+  doc["ssid"] = WIFI_AP_SSID;
+  doc["mode"] = "ap";
+  char buf[192];
+  serializeJson(doc, buf, sizeof(buf));
+  wsTextAll(buf);
+
+  if (takeStateMutex()) {
+    g_state.wifiReady = true;
+    giveStateMutex();
+  }
+}
+
+void webserverScanWifi() {
+  Serial.println("[WiFi] Scan initiated");
+  int16_t n = WiFi.scanNetworks(false, true);
+  JsonDocument doc;
+  doc["cmd"] = "wifi_scan_results";
+  JsonArray arr = doc["networks"].to<JsonArray>();
+  if (n > 0) {
+    for (int i = 0; i < n && i < 15; ++i) {
+      JsonObject obj = arr.add<JsonObject>();
+      obj["ssid"] = WiFi.SSID(i);
+      obj["rssi"] = WiFi.RSSI(i);
+      obj["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+    }
+  }
+  WiFi.scanDelete();
+  char buf[1024];
+  serializeJson(doc, buf, sizeof(buf));
+  wsTextAll(buf);
 }
 
 static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, size_t len) {
@@ -220,6 +390,28 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
     return;
   }
 
+  if (strcmp(cmd, "wifi_connect") == 0) {
+    const char *ssid = doc["ssid"];
+    const char *pass = doc["password"] | "";
+    giveStateMutex();
+    if (ssid != nullptr && ssid[0] != '\0') {
+      webserverConnectSta(ssid, pass);
+    }
+    return;
+  }
+
+  if (strcmp(cmd, "wifi_scan") == 0) {
+    giveStateMutex();
+    webserverScanWifi();
+    return;
+  }
+
+  if (strcmp(cmd, "wifi_reset") == 0) {
+    giveStateMutex();
+    webserverResetToHotspot();
+    return;
+  }
+
   Serial.printf("[WSDBG] unhandled cmd=%s\n", cmd);
   giveStateMutex();
 }
@@ -314,6 +506,28 @@ void webserverInit() {
     Serial.println("[WiFi] STA-only mode enabled (SoftAP disabled)");
   }
 
+  // Load saved credentials from NVS
+  s_wifiPrefs.begin("cart_wifi", false);
+  String savedS = s_wifiPrefs.getString("sta_ssid", "");
+  String savedP = s_wifiPrefs.getString("sta_pass", "");
+  s_wifiPrefs.end();
+
+  if (savedS.length() > 0) {
+    strncpy(s_savedSsid, savedS.c_str(), sizeof(s_savedSsid) - 1);
+    s_savedSsid[sizeof(s_savedSsid) - 1] = '\0';
+    strncpy(s_savedPassword, savedP.c_str(), sizeof(s_savedPassword) - 1);
+    s_savedPassword[sizeof(s_savedPassword) - 1] = '\0';
+    s_hasSavedCredentials = true;
+  } else if (WIFI_STA_SSID != nullptr && WIFI_STA_SSID[0] != '\0') {
+    strncpy(s_savedSsid, WIFI_STA_SSID, sizeof(s_savedSsid) - 1);
+    s_savedSsid[sizeof(s_savedSsid) - 1] = '\0';
+    if (WIFI_STA_PASSWORD != nullptr) {
+      strncpy(s_savedPassword, WIFI_STA_PASSWORD, sizeof(s_savedPassword) - 1);
+      s_savedPassword[sizeof(s_savedPassword) - 1] = '\0';
+    }
+    s_hasSavedCredentials = true;
+  }
+
   // Start the WebSocket server NOW — as soon as the AP is up.
   // If phone connects to the hotspot during the STA search, it can already
   // reach the robot at 192.168.4.1:8080 without waiting 12+ seconds.
@@ -329,11 +543,48 @@ void webserverInit() {
     doc["ip"] = s_robotIp.toString();
     doc["ap_ssid"] = WIFI_AP_SSID;
     if (s_wifiUsingSta) {
-      doc["sta_ssid"] = WIFI_STA_SSID;
+      doc["sta_ssid"] = webserverActiveSsid();
     }
     char out[256];
     const size_t n = serializeJson(doc, out, sizeof(out));
     request->send(200, "application/json", n > 0 ? out : "{\"ok\":true}");
+  });
+
+  s_server.on("/wifi/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    webserverRefreshRobotIp();
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["mode"] = s_wifiUsingSta ? "sta" : "ap";
+    doc["ip"] = s_robotIp.toString();
+    doc["ssid"] = webserverActiveSsid();
+    doc["ap_ip"] = WiFi.softAPIP().toString();
+    char out[256];
+    serializeJson(doc, out, sizeof(out));
+    request->send(200, "application/json", out);
+  });
+
+  s_server.on("/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+    int16_t n = WiFi.scanNetworks(false, true);
+    JsonDocument doc;
+    doc["ok"] = true;
+    JsonArray arr = doc["networks"].to<JsonArray>();
+    if (n > 0) {
+      for (int i = 0; i < n && i < 15; ++i) {
+        JsonObject obj = arr.add<JsonObject>();
+        obj["ssid"] = WiFi.SSID(i);
+        obj["rssi"] = WiFi.RSSI(i);
+        obj["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+      }
+    }
+    WiFi.scanDelete();
+    char out[1024];
+    serializeJson(doc, out, sizeof(out));
+    request->send(200, "application/json", out);
+  });
+
+  s_server.on("/wifi/reset", HTTP_POST, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", "{\"ok\":true,\"status\":\"resetting\"}");
+    webserverResetToHotspot();
   });
 
   s_wsRoot.onEvent(onWsEvent);
@@ -345,13 +596,10 @@ void webserverInit() {
                 static_cast<unsigned>(WEBSOCKET_PORT));
 
   // ── Join home router (STA) ─────────────────────────────────────────────────
-  const bool wantSta =
-      (WIFI_STA_SSID != nullptr && WIFI_STA_SSID[0] != '\0');
-
-  if (wantSta) {
-    WiFi.begin(WIFI_STA_SSID,
-               (WIFI_STA_PASSWORD != nullptr && WIFI_STA_PASSWORD[0] != '\0')
-                   ? WIFI_STA_PASSWORD : nullptr);
+  if (s_hasSavedCredentials && s_savedSsid[0] != '\0') {
+    Serial.printf("[WiFi] Attempting saved STA \"%s\"...\n", s_savedSsid);
+    WiFi.begin(s_savedSsid,
+               s_savedPassword[0] != '\0' ? s_savedPassword : nullptr);
 
     const uint32_t t0 = millis();
     while (WiFi.status() != WL_CONNECTED && (millis() - t0) < WIFI_STA_CONNECT_TIMEOUT_MS) {
@@ -363,16 +611,19 @@ void webserverInit() {
       esp_wifi_set_ps(WIFI_PS_NONE);
       s_wifiUsingSta = true;
       s_robotIp = WiFi.localIP();
-      Serial.printf("[WiFi] STA \"%s\" IP %s\n", WIFI_STA_SSID,
-                    WiFi.localIP().toString().c_str());
+      Serial.printf("[WiFi] STA \"%s\" connected! IP %s\n", s_savedSsid,
+                    s_robotIp.toString().c_str());
       if (MDNS.begin("cart-robot")) {
         MDNS.addService("ws", "tcp", WEBSOCKET_PORT);
         Serial.printf("[mDNS] cart-robot.local:%u\n",
                       static_cast<unsigned>(WEBSOCKET_PORT));
       }
+      displayShowWifiConnected(s_robotIp.toString().c_str(), s_savedSsid);
     } else {
-      Serial.printf("[WiFi] STA timeout\n");
-      WiFi.disconnect(true, false);
+      Serial.printf("[WiFi] STA timeout for \"%s\", staying on SoftAP\n", s_savedSsid);
+      WiFi.disconnect(false, false);
+      s_wifiUsingSta = false;
+      s_robotIp = WiFi.softAPIP();
     }
   }
 
@@ -451,6 +702,9 @@ void webserverBroadcastTelemetry() {
   doc["route_state"] = routeStateJson(g_state.telemetryRouteState);
   doc["route_step"] = g_state.telemetryRouteStep;
   doc["route_total"] = g_state.telemetryRouteTotal;
+  doc["wifi_mode"] = s_wifiUsingSta ? "sta" : "ap";
+  doc["wifi_ssid"] = webserverActiveSsid();
+  doc["ip"] = s_robotIp.toString();
 
   char out[512];
   const size_t n = serializeJson(doc, out, sizeof(out));

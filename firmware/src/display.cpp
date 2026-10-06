@@ -99,7 +99,7 @@ static void requestDrawWifiSummary() {
   }
   snprintf(l1, sizeof(l1), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
   if (webserverWifiUsingSta()) {
-    snprintf(l2, sizeof(l2), "STA %.12s", WIFI_STA_SSID);
+    snprintf(l2, sizeof(l2), "STA %.12s", webserverActiveSsid());
   } else {
     snprintf(l2, sizeof(l2), "AP  %.12s", WIFI_AP_SSID);
   }
@@ -252,24 +252,69 @@ static const char *driveTag(DriveCmd d) {
   }
 }
 
+static char s_wifiNotice1[17] = "";
+static char s_wifiNotice2[17] = "";
+static uint32_t s_wifiNoticeUntilMs = 0;
+
+void displayShowWifiConnecting(const char *ssid) {
+  snprintf(s_wifiNotice1, sizeof(s_wifiNotice1), "CONNECTING WIFI");
+  snprintf(s_wifiNotice2, sizeof(s_wifiNotice2), "%.16s", ssid ? ssid : "");
+  s_wifiNoticeUntilMs = millis() + 15000;
+  requestDraw(s_wifiNotice1, s_wifiNotice2);
+  displayRedrawHardware();
+}
+
+void displayShowWifiConnected(const char *ip, const char *ssid) {
+  (void)ssid;
+  snprintf(s_wifiNotice1, sizeof(s_wifiNotice1), "NEW IP (WIFI):");
+  snprintf(s_wifiNotice2, sizeof(s_wifiNotice2), "%.16s", ip ? ip : "");
+  s_wifiNoticeUntilMs = millis() + 10000;
+  requestDraw(s_wifiNotice1, s_wifiNotice2);
+  displayRedrawHardware();
+}
+
+void displayShowWifiResetHotspot() {
+  snprintf(s_wifiNotice1, sizeof(s_wifiNotice1), "HOTSPOT RESET");
+  snprintf(s_wifiNotice2, sizeof(s_wifiNotice2), "IP 192.168.4.1");
+  s_wifiNoticeUntilMs = millis() + 6000;
+  requestDraw(s_wifiNotice1, s_wifiNotice2);
+  displayRedrawHardware();
+}
+
 void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sensitivity,
                        bool wsConnected, bool motorEnabled, bool autoMode) {
   (void)steerPwm;
   (void)sensitivity;
+  const uint32_t now = millis();
+  if (s_wifiNoticeUntilMs != 0 && static_cast<int32_t>(s_wifiNoticeUntilMs - now) > 0) {
+    requestDraw(s_wifiNotice1, s_wifiNotice2);
+    return;
+  }
+  s_wifiNoticeUntilMs = 0;
+
   char l1[17];
   char l2[17];
   // 16-column line: button results stay visible after the press flash.
   snprintf(l1, sizeof(l1), "E:%s A:%s %s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF",
            driveTag(drive));
-  if (!wsConnected) {
-    webserverRefreshRobotIp();
-    const IPAddress ip = webserverRobotIp();
-    const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
-    if (haveIp) {
-      snprintf(l2, sizeof(l2), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+
+  webserverRefreshRobotIp();
+  const IPAddress ip = webserverRobotIp();
+  const bool usingSta = webserverWifiUsingSta();
+  const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
+
+  // If not connected to app, show IP full-time!
+  // If connected, smoothly cycle between distance and IP every 3 seconds so IP is always readable!
+  const bool showIp = !wsConnected || ((now / 3000U) % 2 == 1);
+
+  if (showIp && haveIp) {
+    if (usingSta) {
+      snprintf(l2, sizeof(l2), "STA %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
     } else {
-      snprintf(l2, sizeof(l2), "No link");
+      snprintf(l2, sizeof(l2), "AP  %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
     }
+  } else if (!haveIp) {
+    snprintf(l2, sizeof(l2), "No link");
   } else if (distCm >= 0.0f && distCm < 400.0f) {
     snprintf(l2, sizeof(l2), "Dst:%3.0f cm", static_cast<double>(distCm));
   } else {
