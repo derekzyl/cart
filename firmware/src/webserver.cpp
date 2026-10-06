@@ -26,8 +26,16 @@ static char s_savedPassword[65] = "";
 static bool s_hasSavedCredentials = false;
 
 static void wsTextAll(const char *payload) {
-  s_wsRoot.textAll(payload);
-  s_wsPath.textAll(payload);
+  s_wsRoot.cleanupClients();
+  s_wsPath.cleanupClients();
+  // A full send queue closes the phone (closeWhenFull defaults to true).
+  // Drop this frame instead of kicking the client.
+  if (s_wsRoot.count() > 0 && s_wsRoot.availableForWriteAll()) {
+    s_wsRoot.textAll(payload);
+  }
+  if (s_wsPath.count() > 0 && s_wsPath.availableForWriteAll()) {
+    s_wsPath.textAll(payload);
+  }
 }
 
 bool webserverWifiUsingSta() {
@@ -79,9 +87,8 @@ static void taskWifiWorker(void *param) {
       pass[sizeof(pass) - 1] = '\0';
 
       Serial.printf("[WiFi-Worker] Connecting to \"%s\"...\n", ssid);
-      WiFi.mode(WIFI_AP_STA);
-      WiFi.disconnect(false, false);
-      vTaskDelay(pdMS_TO_TICKS(100));
+      // Do not call WiFi.mode() or WiFi.disconnect() here. Both restart the
+      // radio, drop phones off the hotspot, and leave port 8080 unanswered.
       WiFi.begin(ssid, pass[0] != '\0' ? pass : nullptr);
 
       const uint32_t t0 = millis();
@@ -466,6 +473,9 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
         n = g_state.wsClientCount;
         giveStateMutex();
       }
+      if (client != nullptr) {
+        client->setCloseClientOnQueueFull(false);
+      }
       IPAddress rip = client ? client->remoteIP() : IPAddress();
       Serial.printf("[WS] client connected id=%u from %u.%u.%u.%u (%d total)\n",
                     static_cast<unsigned>(client ? client->id() : 0U),
@@ -639,13 +649,16 @@ void webserverInit() {
   Serial.printf("[WS] server ready ws://<ip>:%u/ and /ws\n",
                 static_cast<unsigned>(WEBSOCKET_PORT));
 
-  // Start background Wi-Fi management worker task on Core 0
-  xTaskCreatePinnedToCore(taskWifiWorker, "wifi_worker", 4096, nullptr, 2, &s_wifiTaskHandle, 0);
+  // Start background Wi-Fi management worker task on Core 0.
+  // 4096 was tight once ArduinoJson and a scan ran on this task.
+  xTaskCreatePinnedToCore(taskWifiWorker, "wifi_worker", 8192, nullptr, 2, &s_wifiTaskHandle, 0);
 
-  // If saved credentials exist, trigger connection in background (non-blocking)
+  // Saved router credentials stay in NVS, but do not join that network at boot.
+  // A single-radio ESP32 moves the hotspot onto the router's channel as soon as
+  // STA starts, so the phone stays "connected" to CartRobot_Setup while port 8080
+  // stops answering. The app asks for the router join after the hotspot session is up.
   if (s_hasSavedCredentials && s_savedSsid[0] != '\0') {
-    Serial.printf("[WiFi] Background auto-connect to saved STA \"%s\"...\n", s_savedSsid);
-    webserverConnectSta(s_savedSsid, s_savedPassword);
+    Serial.printf("[WiFi] Saved STA \"%s\" — not joining until the app requests it\n", s_savedSsid);
   }
 
   if (takeStateMutex()) {

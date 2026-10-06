@@ -40,6 +40,10 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   double _radius = 1;
   /// True while knob is outside dead zone (user is driving/steering from stick).
   bool _stickWasActive = false;
+  String? _lastSteer;
+  int? _lastPwm;
+  String? _lastMove;
+  DateTime _lastDriveSent = DateTime.fromMillisecondsSinceEpoch(0);
   late final AnimationController _releaseCtrl;
   Animation<Offset>? _releaseAnim;
 
@@ -64,16 +68,32 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     _timer = Timer.periodic(Duration(milliseconds: (1000 / hz).round()), (_) => _emitCommand());
   }
 
+  void _emitDrive(String steer, int pwm, String move) {
+    final bool changed = steer != _lastSteer || pwm != _lastPwm || move != _lastMove;
+    final bool heartbeat =
+        DateTime.now().difference(_lastDriveSent) >= const Duration(milliseconds: 800);
+    if (!changed && !heartbeat) {
+      return;
+    }
+    _lastSteer = steer;
+    _lastPwm = pwm;
+    _lastMove = move;
+    _lastDriveSent = DateTime.now();
+    widget.onCommand(RobotCommands.steer(steer, pwm));
+    if (move != "stop" || changed) {
+      widget.onCommand(RobotCommands.move(move));
+    }
+  }
+
   void _emitCommand() {
     final double mag = _offset.distance;
     if (mag < widget.deadZonePx) {
-      widget.onCommand(RobotCommands.steer("center", 0));
-      // Do not spam move(stop) every tick while centered — that overrides hold-to-drive
-      // on the FWD/REV buttons. Only stop when returning to center from an active drag.
+      // move(stop) is sent only when the command changes, so a Forward hold
+      // is not cancelled by the centered stick.
       if (_stickWasActive) {
-        widget.onCommand(RobotCommands.move("stop"));
         _stickWasActive = false;
       }
+      _emitDrive("center", 0, "stop");
       return;
     }
 
@@ -94,8 +114,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
             ? "rev"
             : "stop";
 
-    widget.onCommand(RobotCommands.steer(steer, pwm));
-    widget.onCommand(RobotCommands.move(move));
+    _emitDrive(steer, pwm, move);
   }
 
   void _onDrag(Offset local, Size size) {

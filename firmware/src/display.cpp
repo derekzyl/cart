@@ -294,31 +294,34 @@ void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sen
 
   char l1[17];
   char l2[17];
-  // 16-column line: button results stay visible after the press flash.
-  snprintf(l1, sizeof(l1), "E:%s A:%s %s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF",
-           driveTag(drive));
+  const bool b1Down = digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW;
+  const bool b2Down = digitalRead(PIN_BUTTON_AUTO_MODE) == LOW;
 
   webserverRefreshRobotIp();
   const IPAddress ip = webserverRobotIp();
   const bool usingSta = webserverWifiUsingSta();
   const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
 
-  // If not connected to app, show IP full-time!
-  // If connected, smoothly cycle between distance and IP every 3 seconds so IP is always readable!
-  const bool showIp = !wsConnected || ((now / 3000U) % 2 == 1);
-
-  if (showIp && haveIp) {
-    if (usingSta) {
-      snprintf(l2, sizeof(l2), "STA %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+  if (!wsConnected) {
+    if (haveIp && usingSta) {
+      snprintf(l1, sizeof(l1), "STA %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+    } else if (haveIp) {
+      snprintf(l1, sizeof(l1), "AP %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
     } else {
-      snprintf(l2, sizeof(l2), "AP  %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+      snprintf(l1, sizeof(l1), "No link");
     }
-  } else if (!haveIp) {
-    snprintf(l2, sizeof(l2), "No link");
-  } else if (distCm >= 0.0f && distCm < 400.0f) {
-    snprintf(l2, sizeof(l2), "Dst:%3.0f cm", static_cast<double>(distCm));
+    snprintf(l2, sizeof(l2), "1:%s 2:%s", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP");
+    requestDraw(l1, l2);
+    return;
+  }
+
+  snprintf(l1, sizeof(l1), "E:%s A:%s %s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF",
+           driveTag(drive));
+  if (distCm >= 0.0f && distCm < 400.0f) {
+    snprintf(l2, sizeof(l2), "1:%s 2:%s %3.0f", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP",
+             static_cast<double>(distCm));
   } else {
-    snprintf(l2, sizeof(l2), "Dst: -- cm");
+    snprintf(l2, sizeof(l2), "1:%s 2:%s", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP");
   }
   requestDraw(l1, l2);
 }

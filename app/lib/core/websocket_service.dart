@@ -3,6 +3,7 @@ import "dart:convert";
 import "dart:io";
 
 import "package:flutter/foundation.dart";
+import "package:flutter/services.dart";
 import "package:web_socket_channel/web_socket_channel.dart";
 
 enum SocketStatus { disconnected, connecting, connected }
@@ -83,6 +84,15 @@ class WebSocketService {
     // Android often returns no interfaces to untrusted apps. That is not proof
     // the phone is off the robot hotspot, so never abort the connection here.
     unawaited(_logLocalNetworkState());
+    if (Platform.isAndroid) {
+      try {
+        final bool? bound =
+            await const MethodChannel("cart/wifi").invokeMethod<bool>("bindWifi");
+        _log("bound process to Wi-Fi (no-internet hotspot) -> $bound");
+      } catch (e) {
+        _log("bind wifi failed: $e");
+      }
+    }
     await _connectInternal();
   }
 
@@ -201,7 +211,10 @@ class WebSocketService {
   void send(Map<String, dynamic> command) {
     if (currentStatus != SocketStatus.connected || _channel == null) return;
     try {
-      _log("tx: ${jsonEncode(command)}");
+      final String cmd = command["cmd"]?.toString() ?? "";
+      if (cmd != "steer" && cmd != "ping") {
+        _log("tx: ${jsonEncode(command)}");
+      }
       _channel!.sink.add(jsonEncode(command));
     } catch (_) {
       _handleDisconnect();

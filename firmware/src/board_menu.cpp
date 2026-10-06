@@ -8,7 +8,7 @@
 #include "webserver.h"
 
 static constexpr uint32_t kMenuEnterHoldMs = 3000;
-static constexpr uint32_t kShortPressMaxMs = 700;
+static constexpr uint32_t kShortPressMaxMs = 2500;
 static constexpr uint32_t kDebounceMs = 45;
 
 static bool s_inMenu = false;
@@ -85,7 +85,13 @@ void boardMenuTick(uint32_t now, void (*onAutoShortPress)()) {
     s_b2EverHigh = true;
   }
   if (!s_b2EverHigh) {
-    // Pin 35 has no internal pullup. If floating or disconnected, ignore it.
+    // Pin 35 has no internal pull-up. A stuck-low or floating pin is ignored
+    // until the 10k to 3.3V is seen (idle HIGH).
+    static bool s_logged = false;
+    if (!s_logged) {
+      s_logged = true;
+      Serial.println("[BTN] BTN2 waiting for HIGH (10k pull-up to 3.3V)");
+    }
     return;
   }
 

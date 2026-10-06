@@ -65,73 +65,76 @@ static float readPotSensitivity() {
   return STEER_SENSITIVITY_MIN + t * (STEER_SENSITIVITY_MAX - STEER_SENSITIVITY_MIN);
 }
 
-static uint32_t s_btn1DownAt = 0;
-static bool s_btn1HoldArmed = false;
-
+static void onBootPressed();
 static void onButton1Pressed();
 static void onButton2Pressed();
 
-static void serviceButtons(uint32_t now) {
-  // 1. BOOT button (GPIO 0) — onboard ESP32 devkit button
-  const bool bootPressed = (digitalRead(PIN_BUTTON_BOOT) == LOW);
-  static bool s_bootLast = false;
-  static uint32_t s_bootDownAt = 0;
-  static bool s_bootResetTriggered = false;
-
-  if (bootPressed != s_bootLast) {
-    s_bootLast = bootPressed;
-    if (bootPressed) {
-      s_bootDownAt = now;
-      s_bootResetTriggered = false;
-      Serial.println("[BTN] BOOT (GPIO 0) DOWN");
-    } else {
-      Serial.println("[BTN] BOOT (GPIO 0) UP");
-      s_bootDownAt = 0;
-    }
+static void serviceOneButton(uint32_t now, bool rawPressed, bool &seenHigh, bool &candidate,
+                             uint32_t &changeAt, bool &stablePressed, uint32_t &downAt,
+                             bool &resetTriggered, void (*onPress)(), const char *name,
+                             const char *holdLine2) {
+  if (!rawPressed) {
+    seenHigh = true;
   }
-
-  if (bootPressed && !s_bootResetTriggered && s_bootDownAt != 0 && (now - s_bootDownAt) >= 800) {
-    s_bootResetTriggered = true;
-    Serial.println("[BTN] BOOT button hold -> RESET TO HOTSPOT!");
-    buzzerBeep(180);
-    webserverResetToHotspot();
-    lcdNotice("HOTSPOT RESET", "BOOT btn hold");
-  }
-
-  // 2. Button 1 (GPIO 33: Drive Enable / Hold for Hotspot Reset)
-  const bool b1Pressed = (digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW);
-  static bool s_b1Last = false;
-  static uint32_t s_b1DownAt = 0;
-  static bool s_b1ResetTriggered = false;
-
-  if (b1Pressed != s_b1Last) {
-    s_b1Last = b1Pressed;
-    if (b1Pressed) {
-      s_b1DownAt = now;
-      s_b1ResetTriggered = false;
-      Serial.println("[BTN] BTN1 (GPIO 33) DOWN");
-    } else {
-      Serial.println("[BTN] BTN1 (GPIO 33) UP");
-      if (!s_b1ResetTriggered && s_b1DownAt != 0 && (now - s_b1DownAt) >= BUTTON_DEBOUNCE_MS) {
-        onButton1Pressed();
+  if (rawPressed != candidate) {
+    candidate = rawPressed;
+    changeAt = now;
+  } else if ((now - changeAt) >= BUTTON_DEBOUNCE_MS && rawPressed != stablePressed) {
+    stablePressed = rawPressed;
+    if (stablePressed) {
+      downAt = now;
+      resetTriggered = false;
+      Serial.printf("[BTN] %s pressed\n", name);
+      if (onPress != nullptr) {
+        onPress();
       }
-      s_b1DownAt = 0;
-      s_b1ResetTriggered = false;
+    } else {
+      downAt = 0;
+      Serial.printf("[BTN] %s released\n", name);
     }
   }
-
-  if (b1Pressed && !s_b1ResetTriggered && s_b1DownAt != 0 && (now - s_b1DownAt) >= 1800) {
-    s_b1ResetTriggered = true;
-    Serial.println("[BTN] BTN1 2s hold -> RESET TO HOTSPOT!");
+  if (seenHigh && stablePressed && !resetTriggered && downAt != 0 && (now - downAt) >= 3000) {
+    resetTriggered = true;
+    Serial.printf("[BTN] %s hold 3s -> hotspot reset\n", name);
     buzzerBeep(180);
     webserverResetToHotspot();
-    lcdNotice("HOTSPOT RESET", "BTN1 hold 2s");
+    lcdNotice("HOTSPOT RESET", holdLine2);
   }
+}
 
-  // 3. Button 2 (GPIO 35: Auto Mode / LCD Setup Menu)
+static void serviceButtons(uint32_t now) {
+  // Active-low: idle is HIGH (10k to 3.3V), press is LOW.
+  // Ignore a pin until it has been seen released, so a stuck-low input
+  // cannot reset the hotspot a couple of seconds after boot.
+  static bool bootSeenHigh = false;
+  static bool bootCandidate = false;
+  static uint32_t bootChangeAt = 0;
+  static bool bootStable = false;
+  static uint32_t bootDownAt = 0;
+  static bool bootReset = false;
+
+  static bool b1SeenHigh = false;
+  static bool b1Candidate = false;
+  static uint32_t b1ChangeAt = 0;
+  static bool b1Stable = false;
+  static uint32_t b1DownAt = 0;
+  static bool b1Reset = false;
+
+  serviceOneButton(now, digitalRead(PIN_BUTTON_BOOT) == LOW, bootSeenHigh, bootCandidate,
+                   bootChangeAt, bootStable, bootDownAt, bootReset, onBootPressed, "BOOT",
+                   "BOOT hold 3s");
+
+  serviceOneButton(now, digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW, b1SeenHigh, b1Candidate,
+                   b1ChangeAt, b1Stable, b1DownAt, b1Reset, onButton1Pressed, "BTN1",
+                   "BTN1 hold 3s");
+
   boardMenuTick(now, onButton2Pressed);
 }
 
+
+static void onBootPressed() {
+  lcdNotice("BOOT BTN", "hold 3s = reset");
+}
 
 static void onButton1Pressed() {
   if (!takeStateMutex()) {
