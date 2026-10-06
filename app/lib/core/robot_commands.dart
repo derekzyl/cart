@@ -12,8 +12,8 @@ class RobotCommands {
       <String, dynamic>{"cmd": "leds", "headlight": state};
   static Map<String, dynamic> buzzerMute(bool state) =>
       <String, dynamic>{"cmd": "buzzer", "mute": state};
-  static Map<String, dynamic> route(String action) =>
-      <String, dynamic>{"cmd": "route", "action": action};
+  static Map<String, dynamic> route(String action, {String name = ""}) =>
+      <String, dynamic>{"cmd": "route", "action": action, "name": name};
   static Map<String, dynamic> ping() => <String, dynamic>{"cmd": "ping"};
   static Map<String, dynamic> wifiConnect(String ssid, String password) =>
       <String, dynamic>{"cmd": "wifi_connect", "ssid": ssid, "password": password};

@@ -34,10 +34,19 @@ class EnableToggleWidget extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Center(
             child: FittedBox(
-              child: Text(
-                enabled ? "MOTORS ON" : "MOTORS OFF",
-                style: AppTheme.labelUi(13,
-                    color: enabled ? AppTheme.kGo : AppTheme.kStop, weight: FontWeight.w700),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    "MTR",
+                    style: AppTheme.labelUi(9, color: AppTheme.kTextSec, weight: FontWeight.w600),
+                  ),
+                  Text(
+                    enabled ? "ON" : "OFF",
+                    style: AppTheme.labelUi(13,
+                        color: enabled ? AppTheme.kGo : AppTheme.kStop, weight: FontWeight.w700),
+                  ),
+                ],
               ),
             ),
           ),

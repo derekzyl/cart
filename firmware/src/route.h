@@ -15,6 +15,14 @@ void routeStopFromCommand();
 /// Erase stored route steps (idle only; stops playback first).
 void routeClearMemory();
 
+/// Remember the name used for the next save / load. Empty becomes "route".
+void routeNoteName(const char *name);
+const char *routeActiveName();
+/// "name1|name2" of saved routes. Pointer is stable until the next call.
+const char *routeLibraryCsv();
+bool routeDeleteNamed(const char *name);
+bool routeLoadNamed(const char *name);
+
 void routeTickRecord(uint32_t nowMs, DriveCmd d, int16_t steerSigned, bool motorsActive);
 void routeTickPlay(uint32_t nowMs, float sensitivity, DriveCmd &outDrive, SteerCmd &outSteer,
                    uint8_t &outPwm, bool &isPlaying);

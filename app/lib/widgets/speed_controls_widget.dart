@@ -34,7 +34,7 @@ class _SpeedControlsWidgetState extends State<SpeedControlsWidget> {
         Expanded(
           flex: 2,
           child: _hold(
-            label: "FORWARD",
+            label: "FWD",
             active: _fwd,
             base: AppTheme.kDim,
             activeFill: AppTheme.kGo,
@@ -53,7 +53,7 @@ class _SpeedControlsWidgetState extends State<SpeedControlsWidget> {
         Expanded(
           flex: 2,
           child: _hold(
-            label: "REVERSE",
+            label: "REV",
             active: _rev,
             base: AppTheme.kDim,
             activeFill: AppTheme.kRev,

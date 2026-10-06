@@ -349,6 +349,9 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
 
   if (strcmp(cmd, "route") == 0) {
     const char *action = doc["action"];
+    const char *name = doc["name"] | "";
+    strncpy(g_state.pendingRouteName, name, 12);
+    g_state.pendingRouteName[12] = '\0';
     if (action != nullptr) {
       if (strcmp(action, "record_start") == 0) {
         g_state.autoMode = false;
@@ -363,8 +366,8 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
         g_state.pendingRoute = PendingRouteAction::PlaybackReverse;
       } else if (strcmp(action, "stop") == 0) {
         g_state.pendingRoute = PendingRouteAction::Stop;
-      } else if (strcmp(action, "clear") == 0) {
-        g_state.pendingRoute = PendingRouteAction::ClearMemory;
+      } else if (strcmp(action, "clear") == 0 || strcmp(action, "delete") == 0) {
+        g_state.pendingRoute = PendingRouteAction::DeleteNamed;
       }
     }
     giveStateMutex();
@@ -710,6 +713,19 @@ void webserverBroadcastTelemetry() {
   JsonDocument doc;
   doc["dist_cm"] = g_state.telemetryDistCm;
   doc["steer_pwm"] = g_state.telemetrySteerPwm;
+  const char *steerDir = "center";
+  switch (g_state.telemetrySteer) {
+    case SteerCmd::Left:
+      steerDir = "left";
+      break;
+    case SteerCmd::Right:
+      steerDir = "right";
+      break;
+    case SteerCmd::Center:
+    default:
+      break;
+  }
+  doc["steer_dir"] = steerDir;
 
   const char *drv = "stop";
   switch (g_state.telemetryDrive) {
@@ -737,11 +753,13 @@ void webserverBroadcastTelemetry() {
   doc["route_state"] = routeStateJson(g_state.telemetryRouteState);
   doc["route_step"] = g_state.telemetryRouteStep;
   doc["route_total"] = g_state.telemetryRouteTotal;
+  doc["route_name"] = routeActiveName();
+  doc["route_names"] = routeLibraryCsv();
   doc["wifi_mode"] = s_wifiUsingSta ? "sta" : "ap";
   doc["wifi_ssid"] = webserverActiveSsid();
   doc["ip"] = s_robotIp.toString();
 
-  char out[512];
+  char out[640];
   const size_t n = serializeJson(doc, out, sizeof(out));
   giveStateMutex();
 

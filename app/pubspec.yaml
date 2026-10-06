@@ -1,5 +1,5 @@
 name: app
-description: ESP32 robot wireless controller
+description: CartBot ESP32 robot wireless controller
 publish_to: "none"
 version: 1.0.0+1
 

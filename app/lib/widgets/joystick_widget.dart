@@ -7,7 +7,6 @@ import "../core/robot_commands.dart";
 import "../core/telemetry_model.dart";
 import "../theme/app_theme.dart";
 import "shared/clipped_corner_box.dart";
-import "shared/data_chip.dart";
 import "shared/panel_label.dart";
 
 class JoystickWidget extends StatefulWidget {
@@ -122,7 +121,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     _releaseAnim = null;
     final Offset center = Offset(size.width / 2, size.height / 2);
     Offset delta = local - center;
-    final double maxR = math.min(size.width, size.height) * 0.38;
+    final double maxR = math.min(size.width, size.height) * 0.36;
     _radius = maxR;
     if (delta.distance > maxR) {
       delta = Offset.fromDirection(delta.direction, maxR);
@@ -165,110 +164,99 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     super.dispose();
   }
 
-  String _steerChip() {
-    final int p = widget.telemetry.steerPwm.clamp(0, 255);
-    final int signed = switch (widget.telemetry.drive) {
-      DriveState.fwd => p,
-      DriveState.rev => -p,
-      DriveState.stop => 0,
-    };
-    return signed == 0 ? "0" : (signed > 0 ? "+$signed" : "$signed");
-  }
-
-  String _spdChip() {
-    return switch (widget.telemetry.drive) {
-      DriveState.fwd => "FWD",
-      DriveState.rev => "REV",
-      DriveState.stop => "0",
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            const PanelLabel("STEERING"),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints c2) {
-                  final double side = math.min(c2.maxWidth * 0.85, c2.maxHeight * 0.7);
-                  return Center(
-                    child: SizedBox(
-                      width: side,
-                      height: side,
-                      child: GestureDetector(
-                        onPanDown: (DragDownDetails d) => _onDrag(d.localPosition, Size(side, side)),
-                        onPanUpdate: (DragUpdateDetails d) => _onDrag(d.localPosition, Size(side, side)),
-                        onPanEnd: (_) => _finishDrag(),
-                        onPanCancel: _finishDrag,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: <Widget>[
-                            CustomPaint(
-                              size: Size(side, side),
-                              painter: _HexJoystickPainter(
-                                offset: _offset,
-                                deadZone: widget.deadZonePx,
-                                maxR: side * 0.38,
-                              ),
-                            ),
-                            _knob(side),
-                            if (widget.autoMode || !widget.enabled)
-                              Positioned.fill(
-                                child: ClippedCornerBox(
-                                  cutSize: 4,
-                                  backgroundColor: AppTheme.kBg.withValues(alpha: 0.72),
-                                  borderColor: AppTheme.kBorder,
-                                  child: Center(
-                                    child: FittedBox(
-                                      child: Text(
-                                        widget.autoMode ? "AUTO — MANUAL LOCKED" : "DISABLED",
-                                        style: AppTheme.labelUi(11, color: AppTheme.kWarn),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const PanelLabel("STEER"),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints c2) {
+              final Size area = Size(c2.maxWidth, c2.maxHeight);
+              final double maxR = math.min(area.width, area.height) * 0.36;
+              final bool playing = widget.telemetry.routeState == RouteState.playing ||
+                  widget.telemetry.routeState == RouteState.playingReverse;
+              final Offset shown = playing && _offset.distance < 0.5 ? _playbackOffset(maxR) : _offset;
+              return GestureDetector(
+                onPanDown: (DragDownDetails d) => _onDrag(d.localPosition, area),
+                onPanUpdate: (DragUpdateDetails d) => _onDrag(d.localPosition, area),
+                onPanEnd: (_) => _finishDrag(),
+                onPanCancel: _finishDrag,
+                behavior: HitTestBehavior.opaque,
+                child: Stack(
+                  fit: StackFit.expand,
+                  clipBehavior: Clip.none,
+                  children: <Widget>[
+                    CustomPaint(
+                      size: area,
+                      painter: _HexJoystickPainter(
+                        offset: shown,
+                        deadZone: widget.deadZonePx,
+                        maxR: maxR,
+                        distanceCm: widget.telemetry.distCm,
                       ),
                     ),
-                  );
-                },
-              ),
-            ),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: DataChip(label: "STR", value: "[${_steerChip()}]"),
+                    _knob(area, shown, animate: playing),
+                    if (widget.autoMode || !widget.enabled)
+                      Positioned.fill(
+                        child: ClippedCornerBox(
+                          cutSize: 4,
+                          backgroundColor: AppTheme.kBg.withValues(alpha: 0.72),
+                          borderColor: AppTheme.kBorder,
+                          child: Center(
+                            child: FittedBox(
+                              child: Text(
+                                widget.autoMode ? "AUTO — MANUAL LOCKED" : "DISABLED",
+                                style: AppTheme.labelUi(11, color: AppTheme.kWarn),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: DataChip(label: "SPD", value: "[${_spdChip()}]"),
-                ),
-              ],
-            ),
-          ],
-        );
-      },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _knob(double side) {
-    final Offset center = Offset(side / 2, side / 2);
-    final double ny = (-_offset.dy / (_radius > 0 ? _radius : 1)).clamp(-1.0, 1.0);
+  Offset _playbackOffset(double maxR) {
+    final double steer = switch (widget.telemetry.steerDir) {
+          "left" => -1.0,
+          "right" => 1.0,
+          _ => 0.0,
+        } *
+        (widget.telemetry.steerPwm / 255.0);
+    final double drive = switch (widget.telemetry.drive) {
+      DriveState.fwd => -1.0,
+      DriveState.rev => 1.0,
+      DriveState.stop => 0.0,
+    };
+    Offset delta = Offset(steer * maxR, drive * maxR);
+    if (delta.distance > maxR) {
+      delta = Offset.fromDirection(delta.direction, maxR);
+    }
+    return delta;
+  }
+
+  Widget _knob(Size area, Offset offset, {required bool animate}) {
+    final Offset center = Offset(area.width / 2, area.height / 2);
+    final double ny = (-offset.dy / (_radius > 0 ? _radius : 1)).clamp(-1.0, 1.0);
     Color knob = AppTheme.kAccent;
     if (ny > 0.08) {
       knob = AppTheme.kGo;
     } else if (ny < -0.08) {
       knob = AppTheme.kRev;
     }
-    return Positioned(
-      left: center.dx + _offset.dx - 14,
-      top: center.dy + _offset.dy - 14,
+    return AnimatedPositioned(
+      duration: animate ? const Duration(milliseconds: 140) : Duration.zero,
+      curve: Curves.easeOut,
+      left: center.dx + offset.dx - 14,
+      top: center.dy + offset.dy - 14,
       child: Container(
         width: 28,
         height: 28,
@@ -293,11 +281,13 @@ class _HexJoystickPainter extends CustomPainter {
     required this.offset,
     required this.deadZone,
     required this.maxR,
+    required this.distanceCm,
   });
 
   final Offset offset;
   final double deadZone;
   final double maxR;
+  final int distanceCm;
 
   Path _hexPath(Offset c, double r) {
     final Path p = Path();
@@ -315,29 +305,98 @@ class _HexJoystickPainter extends CustomPainter {
     return p;
   }
 
+  Color _rangeColor() {
+    if (distanceCm < 0) {
+      return AppTheme.kTextSec;
+    }
+    if (distanceCm < 25) {
+      return AppTheme.kStop;
+    }
+    if (distanceCm < 60) {
+      return AppTheme.kWarn;
+    }
+    return AppTheme.kGo;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final Offset c = Offset(size.width / 2, size.height / 2);
-    final Path hex = _hexPath(c, maxR);
+    final Color range = _rangeColor();
+    final double radarR = math.min(maxR * 1.18, math.min(size.width, size.height) * 0.46);
+
+    for (final double scale in <double>[0.42, 0.7, 1.0]) {
+      canvas.drawCircle(
+        c,
+        radarR * scale,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = AppTheme.kBorder.withValues(alpha: 0.7),
+      );
+    }
+
+    final bool live = distanceCm >= 0;
+    final double clamped = live ? distanceCm.clamp(0, 200).toDouble() : 0;
+    final Rect arcRect = Rect.fromCircle(center: c, radius: radarR);
+    canvas.drawArc(
+      arcRect,
+      -math.pi * 0.15,
+      math.pi * 1.3,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..strokeCap = StrokeCap.round
+        ..color = range.withValues(alpha: 0.28),
+    );
+    canvas.drawArc(
+      arcRect,
+      -math.pi / 2,
+      (clamped / 200.0) * math.pi * 1.3,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..strokeCap = StrokeCap.round
+        ..color = range.withValues(alpha: 0.95),
+    );
+
+    final Path hex = _hexPath(c, maxR * 0.92);
     canvas.drawPath(
       hex,
       Paint()
         ..style = PaintingStyle.fill
-        ..color = AppTheme.kSurface,
+        ..color = AppTheme.kSurface.withValues(alpha: 0.92),
     );
     canvas.drawPath(
       hex,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..color = AppTheme.kBorder,
+        ..color = range.withValues(alpha: 0.55),
     );
 
-    canvas.drawCircle(
-      c,
-      12,
-      Paint()..color = AppTheme.kDim,
-    );
+    canvas.drawCircle(c, 11, Paint()..color = AppTheme.kDim);
+
+    final TextPainter dist = TextPainter(
+      text: TextSpan(
+        text: live ? "$distanceCm" : "--",
+        style: AppTheme.displayNum(13, color: range),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final TextPainter unit = TextPainter(
+      text: TextSpan(
+        text: " cm",
+        style: AppTheme.labelUi(8, color: AppTheme.kTextSec),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final double textW = dist.width + unit.width;
+    final double textTop = c.dy - radarR - dist.height - 2;
+    final double textY = textTop < 0 ? 0 : textTop;
+    dist.paint(canvas, Offset(c.dx - textW / 2, textY));
+    unit.paint(canvas, Offset(c.dx - textW / 2 + dist.width, textY + dist.height - unit.height));
 
     final double labelR = maxR * 1.06;
     _label(canvas, c, labelR, -math.pi / 2, "FWD", _fadeForQuadrant(0, 1));
@@ -384,6 +443,9 @@ class _HexJoystickPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _HexJoystickPainter oldDelegate) {
-    return oldDelegate.offset != offset || oldDelegate.deadZone != deadZone || oldDelegate.maxR != maxR;
+    return oldDelegate.offset != offset ||
+        oldDelegate.deadZone != deadZone ||
+        oldDelegate.maxR != maxR ||
+        oldDelegate.distanceCm != distanceCm;
   }
 }

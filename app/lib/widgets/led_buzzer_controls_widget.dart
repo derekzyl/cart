@@ -3,7 +3,6 @@ import "package:flutter/material.dart";
 import "../theme/app_theme.dart";
 import "shared/clipped_corner_box.dart";
 import "shared/compact_toggle.dart";
-import "shared/panel_label.dart";
 
 class LedBuzzerControlsWidget extends StatefulWidget {
   const LedBuzzerControlsWidget({
@@ -48,120 +47,83 @@ class _LedBuzzerControlsWidgetState extends State<LedBuzzerControlsWidget>
   @override
   Widget build(BuildContext context) {
     final bool blinkNav = widget.navLeds && widget.steeringActive;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        const PanelLabel("SYSTEMS"),
-        Expanded(
-          child: AnimatedBuilder(
-            animation: _blink,
-            builder: (BuildContext context, Widget? _) {
-              final bool leftOn = blinkNav && _blink.value < 0.5;
-              final bool rightOn = blinkNav && _blink.value >= 0.5;
-              return Column(
-                children: <Widget>[
-                  Expanded(
-                    child: _row(
-                      iconL: "◄",
-                      iconR: "►",
-                      leftLit: leftOn,
-                      rightLit: rightOn,
-                      label: "NAV LEDS",
-                      value: widget.navLeds,
-                      onChanged: widget.onNavLeds,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Expanded(
-                    child: _row(
-                      iconL: "◎",
-                      iconR: "",
-                      leftLit: widget.headlight,
-                      rightLit: false,
-                      label: "HEADLIGHT",
-                      value: widget.headlight,
-                      onChanged: widget.onHeadlight,
-                      headlightGlow: widget.headlight,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Expanded(
-                    child: _row(
-                      iconL: "♪",
-                      iconR: "",
-                      leftLit: widget.buzzerMuted,
-                      rightLit: false,
-                      label: "BUZZER",
-                      value: !widget.buzzerMuted,
-                      onChanged: (bool v) => widget.onBuzzerMuted(!v),
-                      activeColor: AppTheme.kAccent,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ],
+    return AnimatedBuilder(
+      animation: _blink,
+      builder: (BuildContext context, Widget? _) {
+        final bool navLit = widget.navLeds && (!blinkNav || _blink.value >= 0.5);
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Expanded(
+              child: _tile(
+                mark: "◄►",
+                lit: navLit,
+                label: "NAV",
+                value: widget.navLeds,
+                onChanged: widget.onNavLeds,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _tile(
+                mark: "◎",
+                lit: widget.headlight,
+                label: "LIGHT",
+                value: widget.headlight,
+                onChanged: widget.onHeadlight,
+                activeColor: AppTheme.kWarn,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _tile(
+                mark: "♪",
+                lit: !widget.buzzerMuted,
+                label: "BUZZ",
+                value: !widget.buzzerMuted,
+                onChanged: (bool v) => widget.onBuzzerMuted(!v),
+                activeColor: AppTheme.kAccent,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _row({
-    required String iconL,
-    required String iconR,
-    required bool leftLit,
-    required bool rightLit,
+  Widget _tile({
+    required String mark,
+    required bool lit,
     required String label,
     required bool value,
     required ValueChanged<bool> onChanged,
-    bool headlightGlow = false,
     Color activeColor = AppTheme.kGo,
   }) {
     return ClippedCornerBox(
       cutSize: 4,
       backgroundColor: AppTheme.kPanel,
-      borderColor: AppTheme.kBorder,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      borderColor: value ? activeColor.withValues(alpha: 0.7) : AppTheme.kBorder,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: 36,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Text(
-                  iconL,
-                  style: AppTheme.monoData(11,
-                      color: leftLit ? AppTheme.kAccent : AppTheme.kTextSec,
-                      weight: FontWeight.w700),
-                ),
-                if (iconR.isNotEmpty)
-                  Text(
-                    iconR,
-                    style: AppTheme.monoData(11,
-                        color: rightLit ? AppTheme.kAccent : AppTheme.kTextSec,
-                        weight: FontWeight.w700),
-                  ),
-              ],
-            ),
+          Text(
+            mark,
+            style: AppTheme.monoData(11, color: lit ? activeColor : AppTheme.kTextSec, weight: FontWeight.w700),
           ),
+          const SizedBox(width: 4),
           Expanded(
-            child: FittedBox(
-              alignment: Alignment.centerLeft,
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                style: AppTheme.labelUi(10, color: AppTheme.kTextSec),
-              ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              style: AppTheme.labelUi(10, color: AppTheme.kTextSec),
             ),
           ),
-          CompactToggle(
-            value: value,
-            onChanged: onChanged,
-            activeColor: headlightGlow ? AppTheme.kWarn : activeColor,
-          ),
+          CompactToggle(value: value, onChanged: onChanged, activeColor: activeColor),
         ],
       ),
     );
   }
+
 }

@@ -78,6 +78,22 @@ static constexpr int PIN_POT_ADC = 34;
 // ---------------------------------------------------------------------------
 static constexpr int PIN_BUTTON_DRIVE_ENABLE = 33;
 static constexpr int PIN_BUTTON_AUTO_MODE = 35;
+// GPIO33 rests near 0.5V: the internal pull-up (~45k) is fighting a 10k to GND,
+// so digitalRead always sees LOW. A press shorts it to about 0V.
+// Read the ADC and treat ~0.5V as released, ~0V as pressed.
+static constexpr int PIN33_ADC_PRESSED_MAX = 350;    // about 0.28V
+static constexpr int PIN33_ADC_RELEASED_MIN = 550;   // about 0.44V
+
+inline bool buttonDriveIsPressed() {
+  static bool pressed = false;
+  const int adc = analogRead(PIN_BUTTON_DRIVE_ENABLE);
+  if (adc <= PIN33_ADC_PRESSED_MAX) {
+    pressed = true;
+  } else if (adc >= PIN33_ADC_RELEASED_MIN) {
+    pressed = false;
+  }
+  return pressed;
+}
 // Onboard ESP32 DevKit BOOT button (GPIO 0, active LOW with internal pull-up)
 static constexpr int PIN_BUTTON_BOOT = 0;
 
@@ -87,7 +103,7 @@ static constexpr int PIN_BUTTON_BOOT = 0;
 static constexpr int PIN_LED_LEFT = 25;
 static constexpr int PIN_LED_RIGHT = 26;
 static constexpr int PIN_LED_HEADLIGHT = 27;
-// Common with NPN/ULN2003: LED turns ON when GPIO is LOW.
+// Active-LOW hardware: LED cathode or driver triggers on LOW, rests OFF on HIGH.
 static constexpr bool LED_GPIO_ACTIVE_LOW = true;
 
 // ---------------------------------------------------------------------------
@@ -148,7 +164,8 @@ enum class PendingRouteAction : uint8_t {
   Playback,
   PlaybackReverse,
   Stop,
-  ClearMemory
+  ClearMemory,
+  DeleteNamed
 };
 
 struct RouteStep {
@@ -175,9 +192,11 @@ struct SharedRobotState {
   bool wifiReady;
 
   PendingRouteAction pendingRoute;
+  char pendingRouteName[13];
 
   int telemetryDistCm;
   uint8_t telemetrySteerPwm;
+  SteerCmd telemetrySteer;
   DriveCmd telemetryDrive;
   bool telemetryEnabled;
   bool telemetryAuto;

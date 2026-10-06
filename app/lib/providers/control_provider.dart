@@ -40,23 +40,29 @@ class ControlState {
   }
 
   static const ControlState initial =
-      ControlState(auto: false, enabled: false, navLeds: true, headlight: false, buzzerMuted: false);
+      ControlState(auto: false, enabled: false, navLeds: false, headlight: false, buzzerMuted: false);
 }
 
 class ControlNotifier extends StateNotifier<ControlState> {
+  DateTime? _manualEnableUntil;
+  DateTime? _manualAutoUntil;
+
   ControlNotifier(this.ref, this.service) : super(ControlState.initial) {
     ref.listen(connectionProvider, (ConnectionUiState? _, ConnectionUiState next) {
       if (next.status == ConnectionStatus.connected) {
         _flushQueue();
-        // Do not push defaultNavLedsOnConnect here — it overwrote the user's nav toggle
-        // every reconnect. Firmware keeps LED state; telemetry syncs the UI.
       }
     });
     ref.listen(telemetryProvider, (AsyncValue<Telemetry>? _, AsyncValue<Telemetry> next) {
       next.whenData((Telemetry telemetry) {
+        final DateTime now = DateTime.now();
+        final bool canUpdateEnable =
+            _manualEnableUntil == null || now.isAfter(_manualEnableUntil!);
+        final bool canUpdateAuto =
+            _manualAutoUntil == null || now.isAfter(_manualAutoUntil!);
         state = state.copyWith(
-          auto: telemetry.auto,
-          enabled: telemetry.enabled,
+          auto: canUpdateAuto ? telemetry.auto : state.auto,
+          enabled: canUpdateEnable ? telemetry.enabled : state.enabled,
           navLeds: telemetry.navLeds,
           headlight: telemetry.headlight,
           buzzerMuted: telemetry.buzzerMuted,
@@ -70,6 +76,13 @@ class ControlNotifier extends StateNotifier<ControlState> {
   final Queue<Map<String, dynamic>> _queue = Queue<Map<String, dynamic>>();
 
   void sendCommand(Map<String, dynamic> command) {
+    if (command["cmd"] == "auto" && command["state"] is bool) {
+      state = state.copyWith(auto: command["state"] as bool);
+      _manualAutoUntil = DateTime.now().add(const Duration(milliseconds: 600));
+    } else if (command["cmd"] == "enable" && command["state"] is bool) {
+      state = state.copyWith(enabled: command["state"] as bool);
+      _manualEnableUntil = DateTime.now().add(const Duration(milliseconds: 600));
+    }
     final ConnectionUiState connection = ref.read(connectionProvider);
     if (connection.status != ConnectionStatus.connected) {
       _queue.add(command);

@@ -5,6 +5,7 @@
 void boardMenuInit();
 
 bool boardMenuIsActive();
+void boardMenuOpen();
 
 /// Call each control-loop iteration after reading millis().
 /// [onAutoShortPress] is invoked for a short BTN2 press when not entering menu.

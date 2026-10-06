@@ -24,6 +24,9 @@ class Telemetry {
     this.wifiMode = "ap",
     this.wifiSsid = "CartRobot_Setup",
     this.ip = "192.168.4.1",
+    this.routeName = "",
+    this.routeNames = "",
+    this.steerDir = "center",
   });
 
   final int distCm;
@@ -44,14 +47,17 @@ class Telemetry {
   final String wifiMode;
   final String wifiSsid;
   final String ip;
+  final String routeName;
+  final String routeNames;
+  final String steerDir;
 
   static const Telemetry initial = Telemetry(
-    distCm: 250,
+    distCm: -1,
     steerPwm: 0,
     drive: DriveState.stop,
     enabled: false,
     auto: false,
-    navLeds: true,
+    navLeds: false,
     headlight: false,
     buzzerMuted: false,
     btn1: false,
@@ -64,6 +70,8 @@ class Telemetry {
     wifiMode: "ap",
     wifiSsid: "CartRobot_Setup",
     ip: "192.168.4.1",
+    routeName: "",
+    routeNames: "",
   );
 
   static Telemetry? tryParse(String raw) {
@@ -90,7 +98,10 @@ class Telemetry {
     final String routeRaw = "${json["route_state"] ?? "idle"}";
 
     return Telemetry(
-      distCm: intVal(json["dist_cm"], 250).clamp(0, 9999),
+      distCm: () {
+        final int raw = intVal(json["dist_cm"], -1);
+        return raw < 0 ? -1 : raw.clamp(0, 9999);
+      }(),
       steerPwm: intVal(json["steer_pwm"], 0).clamp(0, 255),
       drive: switch (driveRaw) {
         "fwd" => DriveState.fwd,
@@ -99,7 +110,7 @@ class Telemetry {
       },
       enabled: boolVal(json["enabled"], false),
       auto: boolVal(json["auto"], false),
-      navLeds: boolVal(json["nav_leds"], true),
+      navLeds: boolVal(json["nav_leds"], false),
       headlight: boolVal(json["headlight"], false),
       buzzerMuted: boolVal(json["buzzer_muted"], false),
       btn1: boolVal(json["btn1"], false),
@@ -117,6 +128,9 @@ class Telemetry {
       wifiMode: "${json["wifi_mode"] ?? "ap"}",
       wifiSsid: "${json["wifi_ssid"] ?? "CartRobot_Setup"}",
       ip: "${json["ip"] ?? "192.168.4.1"}",
+      routeName: "${json["route_name"] ?? ""}",
+      routeNames: "${json["route_names"] ?? ""}",
+      steerDir: "${json["steer_dir"] ?? "center"}",
     );
   }
 }

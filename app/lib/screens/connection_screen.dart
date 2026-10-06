@@ -183,7 +183,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                   children: <Widget>[
                     const SizedBox(height: 8),
                     Text(
-                      "SEARCHING FOR UNIT",
+                      "SEARCHING FOR CARTBOT",
                       textAlign: TextAlign.center,
                       style: AppTheme.displayNum(14, color: AppTheme.kAccent).copyWith(letterSpacing: 4),
                     ),

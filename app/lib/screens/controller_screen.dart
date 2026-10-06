@@ -100,7 +100,7 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
                       Expanded(
-                        flex: 34,
+                        flex: 46,
                         child: _panelPad(
                           child: JoystickWidget(
                             rateHz: settings.commandRateHz,
@@ -114,8 +114,8 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                         ),
                       ),
                       const SizedBox(width: 2),
-                      Expanded(
-                        flex: 24,
+                      SizedBox(
+                        width: (constraints.maxWidth * 0.14).clamp(78.0, 108.0),
                         child: _panelPad(
                           child: Column(
                             children: <Widget>[
@@ -123,8 +123,8 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                 flex: 2,
                                 child: EnableToggleWidget(
                                   enabled: controls.enabled,
-                                  onTap: () async {
-                                    await controlNotifier.heavyHaptic();
+                                  onTap: () {
+                                    controlNotifier.heavyHaptic();
                                     controlNotifier.sendCommand(RobotCommands.enable(!controls.enabled));
                                   },
                                 ),
@@ -134,8 +134,8 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                 flex: 2,
                                 child: AutoToggleWidget(
                                   enabled: controls.auto,
-                                  onTap: () async {
-                                    await controlNotifier.heavyHaptic();
+                                  onTap: () {
+                                    controlNotifier.heavyHaptic();
                                     controlNotifier.sendCommand(RobotCommands.auto(!controls.auto));
                                   },
                                 ),
@@ -172,47 +172,43 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                       ),
                       const SizedBox(width: 2),
                       Expanded(
-                        flex: 42,
+                        flex: 40,
                         child: _panelPad(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
+                              TelemetryPanelWidget(telemetry: telemetry),
+                              const SizedBox(height: 4),
                               Expanded(
-                                flex: 5,
-                                child: TelemetryPanelWidget(telemetry: telemetry),
-                              ),
-                              Container(height: 1, color: AppTheme.kBorder.withValues(alpha: 0.6)),
-                              Expanded(
-                                flex: 5,
                                 child: RoutePanelWidget(
                                   state: route,
-                                  onRecordToggle: () async {
+                                  onRecordToggle: (String name) async {
                                     await controlNotifier.heavyHaptic();
                                     final String action =
                                         route.state == RouteState.recording ? "record_stop" : "record_start";
-                                    controlNotifier.sendCommand(RobotCommands.route(action));
+                                    controlNotifier.sendCommand(RobotCommands.route(action, name: name));
                                   },
-                                  onPlayback: () async {
+                                  onPlayback: (String name) async {
                                     await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.route("playback"));
+                                    controlNotifier.sendCommand(RobotCommands.route("playback", name: name));
                                   },
-                                  onReturn: () async {
+                                  onReturn: (String name) async {
                                     await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.route("playback_reverse"));
+                                    controlNotifier.sendCommand(RobotCommands.route("playback_reverse", name: name));
                                   },
                                   onStop: () async {
                                     await controlNotifier.heavyHaptic();
                                     controlNotifier.sendCommand(RobotCommands.route("stop"));
                                   },
-                                  onClearMemory: () async {
+                                  onDelete: (String name) async {
                                     await controlNotifier.heavyHaptic();
-                                    controlNotifier.sendCommand(RobotCommands.route("clear"));
+                                    controlNotifier.sendCommand(RobotCommands.route("delete", name: name));
                                   },
                                 ),
                               ),
-                              Container(height: 1, color: AppTheme.kBorder.withValues(alpha: 0.6)),
-                              Expanded(
-                                flex: 3,
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                height: 36,
                                 child: LedBuzzerControlsWidget(
                                   navLeds: controls.navLeds,
                                   headlight: controls.headlight,

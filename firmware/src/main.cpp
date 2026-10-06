@@ -124,7 +124,7 @@ static void serviceButtons(uint32_t now) {
                    bootChangeAt, bootStable, bootDownAt, bootReset, onBootPressed, "BOOT",
                    "BOOT hold 3s");
 
-  serviceOneButton(now, digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW, b1SeenHigh, b1Candidate,
+  serviceOneButton(now, buttonDriveIsPressed(), b1SeenHigh, b1Candidate,
                    b1ChangeAt, b1Stable, b1DownAt, b1Reset, onButton1Pressed, "BTN1",
                    "BTN1 hold 3s");
 
@@ -137,14 +137,17 @@ static void onBootPressed() {
 }
 
 static void onButton1Pressed() {
+  if (boardMenuIsActive()) {
+    return;
+  }
   if (!takeStateMutex()) {
     return;
   }
   g_state.motorEnabled = !g_state.motorEnabled;
   const bool on = g_state.motorEnabled;
-  Serial.printf("[BTN] enable -> %u\n", on ? 1U : 0U);
   giveStateMutex();
-  lcdNotice(on ? "ENABLE ON" : "ENABLE OFF", "BTN1 pressed");
+  Serial.printf("[BTN1] motor enable -> %u\n", on ? 1U : 0U);
+  lcdNotice(on ? "MTR ENABLED" : "MTR DISABLED", "BTN1 pressed");
 }
 
 static void onButton2Pressed() {
@@ -231,22 +234,34 @@ static void applyManualDrive(DriveCmd d) {
 
 static void consumePendingRoute() {
   PendingRouteAction a = PendingRouteAction::None;
+  char name[13];
+  name[0] = '\0';
   if (takeStateMutex()) {
     a = g_state.pendingRoute;
     g_state.pendingRoute = PendingRouteAction::None;
+    strncpy(name, g_state.pendingRouteName, 12);
+    name[12] = '\0';
     giveStateMutex();
   }
   switch (a) {
     case PendingRouteAction::RecordStart:
+      routeNoteName(name);
       routeStartRecording();
       break;
     case PendingRouteAction::RecordStop:
+      routeNoteName(name);
       routeStopRecording();
       break;
     case PendingRouteAction::Playback:
+      if (name[0] != '\0') {
+        routeLoadNamed(name);
+      }
       routeStartPlayback(false);
       break;
     case PendingRouteAction::PlaybackReverse:
+      if (name[0] != '\0') {
+        routeLoadNamed(name);
+      }
       routeStartPlayback(true);
       break;
     case PendingRouteAction::Stop:
@@ -257,6 +272,9 @@ static void consumePendingRoute() {
       break;
     case PendingRouteAction::ClearMemory:
       routeClearMemory();
+      break;
+    case PendingRouteAction::DeleteNamed:
+      routeDeleteNamed(name);
       break;
     case PendingRouteAction::None:
     default:
@@ -311,7 +329,7 @@ static void taskControlCore1(void *param) {
 
     bool motorEnabled = false;
     bool autoMode = false;
-    bool navLeds = true;
+    bool navLeds = false;
     bool headlight = false;
     bool buzzMute = false;
     bool watchdog = false;
@@ -430,15 +448,17 @@ static void taskControlCore1(void *param) {
     const uint8_t telemSteer = watchdog ? 0 : appliedSteerPwm;
 
     if (takeStateMutex()) {
-      g_state.telemetryDistCm = static_cast<int>(lroundf(distCm));
+      const bool distLive = ultrasonicEchoAgeMs() < 1000;
+      g_state.telemetryDistCm = distLive ? static_cast<int>(lroundf(distCm)) : -1;
       g_state.telemetrySteerPwm = telemSteer;
+      g_state.telemetrySteer = watchdog ? SteerCmd::Center : appliedSteer;
       g_state.telemetryDrive = telemDrive;
       g_state.telemetryEnabled = motorEnabled && !watchdog;
       g_state.telemetryAuto = autoMode;
       g_state.telemetryNavLeds = navLeds;
       g_state.telemetryHeadlight = headlight;
       g_state.telemetryBuzzerMuted = buzzMute;
-      g_state.telemetryBtn1 = (digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW);
+      g_state.telemetryBtn1 = buttonDriveIsPressed();
       g_state.telemetryBtn2 = (digitalRead(PIN_BUTTON_AUTO_MODE) == LOW);
       g_state.telemetrySensitivity = sensitivity;
       g_state.telemetryRouteState = routeGetState();
@@ -476,23 +496,26 @@ void setup() {
 
   g_state.motorEnabled = false;
   g_state.autoMode = false;
-  g_state.navLedsEnabled = true;
+  g_state.navLedsEnabled = false;
   g_state.headlightOn = false;
   g_state.buzzerMuted = false;
   g_state.watchdogTripped = false;
   g_state.driveCmd = DriveCmd::Stop;
   g_state.steerCmd = SteerCmd::Center;
   g_state.steerPwmRaw = 0;
+  g_state.telemetrySteer = SteerCmd::Center;
   g_state.lastCommandedSpeedPwm = DEFAULT_COMMANDED_SPEED_PWM;
   g_state.lastWsMessageMs = millis();
   g_state.wsClientCount = 0;
   g_state.wifiReady = false;
   g_state.pendingRoute = PendingRouteAction::None;
+  g_state.pendingRouteName[0] = '\0';
 
   // LCD first — I2C + backpack need a clean bus. Init after WiFi often finds no device / dead panel.
   
   displayInit();
   webserverInit();
+  displayForceReinit();
   displayAfterNetworkUp();
 
   motorInit();
@@ -505,6 +528,7 @@ void setup() {
 
   pinMode(PIN_BUTTON_BOOT, INPUT_PULLUP);
   pinMode(PIN_BUTTON_DRIVE_ENABLE, INPUT_PULLUP);
+  analogSetPinAttenuation(PIN_BUTTON_DRIVE_ENABLE, ADC_11db);
   // GPIO35 cannot use the internal pull-up; the 10k to 3.3V does that job.
   pinMode(PIN_BUTTON_AUTO_MODE, INPUT);
   boardMenuInit();

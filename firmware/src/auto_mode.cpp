@@ -33,7 +33,7 @@ void autoModeTick(uint32_t nowMs, float distCm, DriveCmd &outDrive, SteerCmd &ou
 
   switch (s_fsm) {
     case AutoFsm::Forward: {
-      if (distCm < 20.0f) {
+      if (distCm >= 0.0f && distCm < 20.0f) {
         s_avoidLeft = !s_avoidLeft;
         s_fsm = AutoFsm::AvoidTurn;
         s_phaseStartMs = nowMs;
@@ -41,7 +41,7 @@ void autoModeTick(uint32_t nowMs, float distCm, DriveCmd &outDrive, SteerCmd &ou
       }
       outSteer = SteerCmd::Center;
       outSteerPwm = 0;
-      if (distCm > 40.0f) {
+      if (distCm > 40.0f || distCm < 0.0f) {
         outForwardPercent = 100;
         outDrive = DriveCmd::Forward;
       } else if (distCm >= 20.0f) {
@@ -63,7 +63,7 @@ void autoModeTick(uint32_t nowMs, float distCm, DriveCmd &outDrive, SteerCmd &ou
       break;
     }
     case AutoFsm::AvoidForward: {
-      if (distCm < 20.0f) {
+      if (distCm >= 0.0f && distCm < 20.0f) {
         s_avoidLeft = !s_avoidLeft;
         s_fsm = AutoFsm::AvoidTurn;
         s_phaseStartMs = nowMs;

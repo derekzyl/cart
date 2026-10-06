@@ -34,7 +34,7 @@ void buzzerTick(uint32_t nowMs, float distCm, bool forceOff) {
     return;
   }
 
-  if (distCm > 40.0f) {
+  if (distCm < 0.0f || distCm > 40.0f) {
     digitalWrite(PIN_BUZZER, LOW);
     return;
   }

@@ -2,7 +2,6 @@ import "package:flutter/material.dart";
 
 import "../core/telemetry_model.dart";
 import "../theme/app_theme.dart";
-import "arc_gauge_widget.dart";
 import "drive_badge_widget.dart";
 import "shared/clipped_corner_box.dart";
 import "shared/data_chip.dart";
@@ -18,88 +17,87 @@ class TelemetryPanelWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final int signedSteer = switch (telemetry.drive) {
-      DriveState.fwd => telemetry.steerPwm,
-      DriveState.rev => -telemetry.steerPwm,
-      DriveState.stop => 0,
+    final int signedSteer = switch (telemetry.steerDir) {
+      "left" => -telemetry.steerPwm,
+      "right" => telemetry.steerPwm,
+      _ => 0,
     };
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 280),
-              curve: Curves.easeOut,
-              height: telemetry.auto ? 20 : 0,
-              child: telemetry.auto
-                  ? ClippedCornerBox(
-                      cutSize: 4,
-                      backgroundColor: AppTheme.kWarn.withValues(alpha: 0.15),
-                      borderColor: AppTheme.kWarn.withValues(alpha: 0.6),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Center(
-                        child: FittedBox(
-                          child: Text(
-                            "◈ AUTO MODE ACTIVE",
-                            style: AppTheme.labelUi(10, color: AppTheme.kWarn, weight: FontWeight.w700),
-                          ),
-                        ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-            Expanded(
-              flex: 5,
-              child: ArcGaugeWidget(distanceCm: telemetry.distCm),
-            ),
-            Expanded(
-              flex: 2,
-              child: Center(child: DriveBadgeWidget(drive: telemetry.drive)),
-            ),
-            Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        Expanded(
-                          child: DataChip(
-                            label: "SENS",
-                            value: telemetry.sensitivity.toStringAsFixed(1),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          flex: 2,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: <Widget>[
-                              FittedBox(
-                                alignment: Alignment.centerLeft,
-                                fit: BoxFit.scaleDown,
-                                child: Text("STR", style: AppTheme.labelUi(9, color: AppTheme.kTextSec)),
-                              ),
-                              Expanded(child: SteeringBarWidget(pwm: signedSteer)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: _btnDots(telemetry.btn1, telemetry.btn2),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (telemetry.auto)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: ClippedCornerBox(
+              cutSize: 4,
+              backgroundColor: AppTheme.kWarn.withValues(alpha: 0.15),
+              borderColor: AppTheme.kWarn.withValues(alpha: 0.6),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Text(
+                "AUTO",
+                textAlign: TextAlign.center,
+                style: AppTheme.labelUi(10, color: AppTheme.kWarn, weight: FontWeight.w700),
               ),
             ),
-          ],
-        );
-      },
+          ),
+        _distanceRow(telemetry.distCm),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: 28,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: DriveBadgeWidget(drive: telemetry.drive),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(flex: 3, child: SteeringBarWidget(pwm: signedSteer)),
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 62,
+                child: DataChip(
+                  label: "SENS",
+                  value: telemetry.sensitivity.toStringAsFixed(1),
+                ),
+              ),
+              const SizedBox(width: 4),
+              _btnDots(telemetry.btn1, telemetry.btn2),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _distanceRow(int cm) {
+    final bool live = cm >= 0;
+    final Color tone = !live
+        ? AppTheme.kTextSec
+        : cm < 25
+            ? AppTheme.kStop
+            : cm < 60
+                ? AppTheme.kWarn
+                : AppTheme.kGo;
+    return ClippedCornerBox(
+      cutSize: 4,
+      backgroundColor: AppTheme.kPanel,
+      borderColor: tone.withValues(alpha: live ? 0.8 : 0.4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Row(
+        children: <Widget>[
+          Text("DIST", style: AppTheme.labelUi(10, color: AppTheme.kTextSec, weight: FontWeight.w700)),
+          const Spacer(),
+          Text(
+            live ? "$cm cm" : "no echo",
+            style: AppTheme.displayNum(16, color: tone),
+          ),
+        ],
+      ),
     );
   }
 

@@ -10,12 +10,16 @@ class RouteUiState {
     required this.step,
     required this.total,
     required this.interrupted,
+    this.activeName = "",
+    this.savedNames = const <String>[],
   });
 
   final RouteState state;
   final int step;
   final int total;
   final bool interrupted;
+  final String activeName;
+  final List<String> savedNames;
 
   bool get canRecord => state == RouteState.idle;
   bool get canPlay => state == RouteState.idle && total > 0;
@@ -31,12 +35,16 @@ class RouteUiState {
     int? step,
     int? total,
     bool? interrupted,
+    String? activeName,
+    List<String>? savedNames,
   }) {
     return RouteUiState(
       state: state ?? this.state,
       step: step ?? this.step,
       total: total ?? this.total,
       interrupted: interrupted ?? this.interrupted,
+      activeName: activeName ?? this.activeName,
+      savedNames: savedNames ?? this.savedNames,
     );
   }
 
@@ -56,10 +64,17 @@ class RouteNotifier extends StateNotifier<RouteUiState> {
     });
     ref.listen(telemetryProvider, (AsyncValue<Telemetry>? _, AsyncValue<Telemetry> next) {
       next.whenData((Telemetry telemetry) {
+        final List<String> names = telemetry.routeNames
+            .split("|")
+            .map((String s) => s.trim())
+            .where((String s) => s.isNotEmpty)
+            .toList();
         state = state.copyWith(
           state: telemetry.routeState,
           step: telemetry.routeStep,
           total: telemetry.routeTotal,
+          activeName: telemetry.routeName,
+          savedNames: names,
         );
       });
     });

@@ -1,5 +1,6 @@
 // firmware/src/display.cpp
 #include "display.h"
+#include "route.h"
 #include "webserver.h"
 
 #include <LiquidCrystal_I2C.h>
@@ -71,6 +72,23 @@ static uint8_t scanLcdI2cAddress() {
   return LCD_I2C_ADDR_PRIMARY;
 }
 
+static void wireBeginLcd() {
+#if defined(ESP32)
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, LCD_I2C_HZ);
+  Wire.setTimeOut(20);
+#else
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire.setClock(LCD_I2C_HZ);
+#endif
+}
+
+static void padLine(char *dst, const char *src) {
+  memset(dst, ' ', 16);
+  dst[16] = '\0';
+  const size_t n = strnlen(src, 16);
+  memcpy(dst, src, n);
+}
+
 static void requestDraw(const char *l1, const char *l2) {
   char next1[17];
   char next2[17];
@@ -108,12 +126,7 @@ static void requestDrawWifiSummary() {
 
 
 void displayInit() {
-#if defined(ESP32)
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, LCD_I2C_HZ);
-#else
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(LCD_I2C_HZ);
-#endif
+  wireBeginLcd();
   delay(50);
 
   logFullI2cScan();
@@ -129,12 +142,7 @@ void displayInit() {
   s_lcd = new LiquidCrystal_I2C(addr, 16, 2);
   // Library init() calls Wire.begin() with no args; restore our pins + speed after.
   s_lcd->init();
-#if defined(ESP32)
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, LCD_I2C_HZ);
-#else
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(LCD_I2C_HZ);
-#endif
+  wireBeginLcd();
   s_lcd->backlight();
   s_lastDrawMs = 0;
 
@@ -167,12 +175,7 @@ void displayForceReinit() {
   }
   Wire.end();  // full hardware teardown
   delay(80);
-#if defined(ESP32)
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, LCD_I2C_HZ);
-#else
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(LCD_I2C_HZ);
-#endif
+  wireBeginLcd();
   delay(50);
   // Re-scan in case the backpack address changed / was misdetected after RF startup.
   const uint8_t addr = scanLcdI2cAddress();
@@ -184,12 +187,7 @@ void displayForceReinit() {
   s_lcd = new LiquidCrystal_I2C(addr, 16, 2);
   s_lcd->init();  // full controller init on a fresh object
   // s_lcd->init() calls Wire.begin() with no args; restore our pins.
-#if defined(ESP32)
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, LCD_I2C_HZ);
-#else
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  Wire.setClock(LCD_I2C_HZ);
-#endif
+  wireBeginLcd();
   delay(30);
   s_lcd->backlight();
   delay(30);
@@ -218,11 +216,16 @@ void displayRedrawHardware() {
   if (s_lcd == nullptr) {
     return;
   }
-  s_lcd->clear();
+  char row1[17];
+  char row2[17];
+  padLine(row1, s_line1);
+  padLine(row2, s_line2);
+  // Overwrite both rows. clear() blocks when the I2C bus is busy after Wi-Fi
+  // and leaves the boot address on screen.
   s_lcd->setCursor(0, 0);
-  s_lcd->print(s_line1);
+  s_lcd->print(row1);
   s_lcd->setCursor(0, 1);
-  s_lcd->print(s_line2);
+  s_lcd->print(row2);
   s_lastDrawMs = millis();
   s_dirty = false;
 }
@@ -283,46 +286,57 @@ void displayShowWifiResetHotspot() {
 
 void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sensitivity,
                        bool wsConnected, bool motorEnabled, bool autoMode) {
-  (void)steerPwm;
-  (void)sensitivity;
-  const uint32_t now = millis();
-  if (s_wifiNoticeUntilMs != 0 && static_cast<int32_t>(s_wifiNoticeUntilMs - now) > 0) {
-    requestDraw(s_wifiNotice1, s_wifiNotice2);
-    return;
-  }
   s_wifiNoticeUntilMs = 0;
+
+  static uint32_t s_lastPageSwitchMs = 0;
+  static uint8_t s_page = 0;
+
+  const uint32_t now = millis();
+  if (now - s_lastPageSwitchMs >= 2500) {
+    s_lastPageSwitchMs = now;
+    s_page = (s_page + 1) % 3;
+  }
 
   char l1[17];
   char l2[17];
-  const bool b1Down = digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW;
-  const bool b2Down = digitalRead(PIN_BUTTON_AUTO_MODE) == LOW;
 
-  webserverRefreshRobotIp();
-  const IPAddress ip = webserverRobotIp();
-  const bool usingSta = webserverWifiUsingSta();
-  const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
-
-  if (!wsConnected) {
-    if (haveIp && usingSta) {
-      snprintf(l1, sizeof(l1), "STA %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-    } else if (haveIp) {
-      snprintf(l1, sizeof(l1), "AP %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
-    } else {
-      snprintf(l1, sizeof(l1), "No link");
+  switch (s_page) {
+    case 0: {
+      // Screen 1: Network & IP address
+      webserverRefreshRobotIp();
+      const IPAddress ip = webserverRobotIp();
+      const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
+      if (haveIp) {
+        snprintf(l1, sizeof(l1), "IP %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+      } else {
+        snprintf(l1, sizeof(l1), "IP Starting...");
+      }
+      if (webserverWifiUsingSta()) {
+        snprintf(l2, sizeof(l2), "STA %.12s", webserverActiveSsid());
+      } else {
+        snprintf(l2, sizeof(l2), "AP  %.12s", WIFI_AP_SSID);
+      }
+      break;
     }
-    snprintf(l2, sizeof(l2), "1:%s 2:%s", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP");
-    requestDraw(l1, l2);
-    return;
+    case 1: {
+      // Screen 2: Motor, Auto & Steering
+      snprintf(l1, sizeof(l1), "MTR:%s  AUTO:%s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF");
+      snprintf(l2, sizeof(l2), "DRV:%-4s STR:%3u", driveTag(drive), steerPwm);
+      break;
+    }
+    case 2:
+    default: {
+      // Screen 3: Ultrasonic Distance & Telemetry
+      if (distCm >= 0.0f && distCm <= 400.0f) {
+        snprintf(l1, sizeof(l1), "DIST: %3.0f cm", static_cast<double>(distCm));
+      } else {
+        snprintf(l1, sizeof(l1), "DIST: --- cm");
+      }
+      snprintf(l2, sizeof(l2), "WS:%s  SEN:%.1fx", wsConnected ? "ON" : "--", static_cast<double>(sensitivity));
+      break;
+    }
   }
 
-  snprintf(l1, sizeof(l1), "E:%s A:%s %s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF",
-           driveTag(drive));
-  if (distCm >= 0.0f && distCm < 400.0f) {
-    snprintf(l2, sizeof(l2), "1:%s 2:%s %3.0f", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP",
-             static_cast<double>(distCm));
-  } else {
-    snprintf(l2, sizeof(l2), "1:%s 2:%s", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP");
-  }
   requestDraw(l1, l2);
 }
 
@@ -341,19 +355,28 @@ static const char *autoSubLabel(AutoFsm s) {
 void displayShowAuto(float distCm, AutoFsm autoState) {
   char l1[17];
   char l2[17];
+  const bool b1Down = buttonDriveIsPressed();
+  const bool b2Down = digitalRead(PIN_BUTTON_AUTO_MODE) == LOW;
   if (distCm >= 0.0f && distCm < 400.0f) {
-    snprintf(l1, sizeof(l1), "AUTO Dst:%02.0fcm", static_cast<double>(distCm));
+    snprintf(l1, sizeof(l1), "AUTO %s %3.0f", autoSubLabel(autoState), static_cast<double>(distCm));
   } else {
-    snprintf(l1, sizeof(l1), "AUTO Dst:--cm");
+    snprintf(l1, sizeof(l1), "AUTO %s", autoSubLabel(autoState));
   }
-  snprintf(l2, sizeof(l2), "%s", autoSubLabel(autoState));
+  snprintf(l2, sizeof(l2), "1:%s 2:%s", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP");
   requestDraw(l1, l2);
 }
 
 void displayShowRecording(uint16_t steps) {
+  char l1[17];
   char l2[17];
+  const char *name = routeActiveName();
+  if (name != nullptr && name[0] != '\0') {
+    snprintf(l1, sizeof(l1), "REC %.12s", name);
+  } else {
+    snprintf(l1, sizeof(l1), "RECORDING...");
+  }
   snprintf(l2, sizeof(l2), "Steps: %03u", static_cast<unsigned>(steps));
-  requestDraw("RECORDING...", l2);
+  requestDraw(l1, l2);
 }
 
 void displayShowPlayback(uint16_t idx, uint16_t total, float distCm, bool reverse) {

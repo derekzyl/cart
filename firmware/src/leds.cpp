@@ -5,11 +5,11 @@
 static bool s_headlightUser = false;
 
 static inline void ledWrite(int pin, bool lit) {
-#if LED_GPIO_ACTIVE_LOW
-  digitalWrite(pin, lit ? LOW : HIGH);
-#else
-  digitalWrite(pin, lit ? HIGH : LOW);
-#endif
+  if (LED_GPIO_ACTIVE_LOW) {
+    digitalWrite(pin, lit ? LOW : HIGH);
+  } else {
+    digitalWrite(pin, lit ? HIGH : LOW);
+  }
 }
 
 void ledsInit() {

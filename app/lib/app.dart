@@ -16,7 +16,7 @@ class RobotControlApp extends ConsumerWidget {
     final ConnectionUiState connection = ref.watch(connectionProvider);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: "Robot Controller",
+      title: "CartBot",
       theme: AppTheme.themeData,
       home: connection.status == ConnectionStatus.connected
           ? const ControllerScreen()

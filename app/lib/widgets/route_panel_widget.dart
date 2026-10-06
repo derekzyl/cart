@@ -14,15 +14,15 @@ class RoutePanelWidget extends StatefulWidget {
     required this.onPlayback,
     required this.onReturn,
     required this.onStop,
-    required this.onClearMemory,
+    required this.onDelete,
   });
 
   final RouteUiState state;
-  final VoidCallback onRecordToggle;
-  final VoidCallback onPlayback;
-  final VoidCallback onReturn;
+  final void Function(String name) onRecordToggle;
+  final void Function(String name) onPlayback;
+  final void Function(String name) onReturn;
   final VoidCallback onStop;
-  final VoidCallback onClearMemory;
+  final void Function(String name) onDelete;
 
   @override
   State<RoutePanelWidget> createState() => _RoutePanelWidgetState();
@@ -33,16 +33,15 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
     vsync: this,
     duration: const Duration(milliseconds: 600),
   );
-
-  @override
-  void dispose() {
-    _recPulse.dispose();
-    super.dispose();
-  }
+  final TextEditingController _name = TextEditingController(text: "route1");
 
   @override
   void didUpdateWidget(covariant RoutePanelWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final String active = widget.state.activeName.trim();
+    if (active.isNotEmpty && active != _name.text && widget.state.state != RouteState.idle) {
+      _name.text = active;
+    }
     final bool rec = widget.state.state == RouteState.recording;
     if (rec) {
       _recPulse.repeat(reverse: true);
@@ -50,6 +49,18 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
       _recPulse.stop();
       _recPulse.value = 0;
     }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _recPulse.dispose();
+    super.dispose();
+  }
+
+  String get _routeName {
+    final String n = _name.text.trim();
+    return n.isEmpty ? "route1" : n;
   }
 
   @override
@@ -75,8 +86,8 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Expanded(
-                flex: 2,
+              SizedBox(
+                height: 22,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
@@ -120,7 +131,42 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
                   },
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 28,
+                child: TextField(
+                  controller: _name,
+                  style: AppTheme.labelUi(12, color: AppTheme.kTextPri),
+                  cursorColor: AppTheme.kAccent,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: "Route name",
+                    hintStyle: AppTheme.labelUi(11, color: AppTheme.kTextSec),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              if (s.savedNames.isNotEmpty)
+                SizedBox(
+                  height: 26,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: s.savedNames
+                        .map(
+                          (String name) => Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: ActionChip(
+                              label: Text(name, style: AppTheme.labelUi(11)),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => setState(() => _name.text = name),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              const SizedBox(height: 4),
               Expanded(
                 flex: 3,
                 child: Column(
@@ -128,7 +174,14 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
                     Expanded(
                       child: Row(
                         children: <Widget>[
-                          Expanded(child: _gridBtn(s.state == RouteState.recording ? "STOP REC" : "RECORD", s.canRecord || s.state == RouteState.recording, AppTheme.kRecord, widget.onRecordToggle)),
+                          Expanded(
+                            child: _gridBtn(
+                              s.state == RouteState.recording ? "SAVE" : "RECORD",
+                              s.state == RouteState.idle || s.state == RouteState.recording,
+                              AppTheme.kRecord,
+                              () => widget.onRecordToggle(_routeName),
+                            ),
+                          ),
                           const SizedBox(width: 4),
                           Expanded(child: _gridBtn("STOP", s.canStop, AppTheme.kStop, widget.onStop)),
                         ],
@@ -138,19 +191,33 @@ class _RoutePanelWidgetState extends State<RoutePanelWidget> with SingleTickerPr
                     Expanded(
                       child: Row(
                         children: <Widget>[
-                          Expanded(child: _gridBtn("PLAY", s.canPlay, AppTheme.kGo, widget.onPlayback)),
+                          Expanded(
+                            child: _gridBtn(
+                              "PLAY",
+                              s.state == RouteState.idle,
+                              AppTheme.kGo,
+                              () => widget.onPlayback(_routeName),
+                            ),
+                          ),
                           const SizedBox(width: 4),
-                          Expanded(child: _gridBtn("RETURN", s.canReturn, AppTheme.kRev, widget.onReturn)),
+                          Expanded(
+                            child: _gridBtn(
+                              "RETURN",
+                              s.state == RouteState.idle,
+                              AppTheme.kRev,
+                              () => widget.onReturn(_routeName),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: _gridBtn(
+                              "DELETE",
+                              s.state == RouteState.idle,
+                              AppTheme.kStop,
+                              () => widget.onDelete(_routeName),
+                            ),
+                          ),
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Expanded(
-                      child: _gridBtn(
-                        "CLEAR ROUTE",
-                        s.canClearMemory,
-                        AppTheme.kStop,
-                        widget.onClearMemory,
                       ),
                     ),
                   ],
