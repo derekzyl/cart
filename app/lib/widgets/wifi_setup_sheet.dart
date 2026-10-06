@@ -224,6 +224,26 @@ class _WifiSetupSheetState extends ConsumerState<WifiSetupSheet> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 8),
+                // Helper tip card: Hotspot credentials & hardware reset button guide
+                ClippedCornerBox(
+                  cutSize: 4,
+                  backgroundColor: AppTheme.kBorder.withValues(alpha: 0.2),
+                  borderColor: AppTheme.kBorder,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(Icons.info_outline_rounded, color: AppTheme.kAccent, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "Robot Hotspot: CartRobot_Setup • Password: cartsetup\nHardware Reset: Hold ESP32 BOOT button (GPIO 0) or BTN1 for 2s to restore Hotspot.",
+                          style: AppTheme.labelUi(10, color: AppTheme.kTextSec),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 14),
 
                 // Success / New IP notification card if connected

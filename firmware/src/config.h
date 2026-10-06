@@ -78,6 +78,8 @@ static constexpr int PIN_POT_ADC = 34;
 // ---------------------------------------------------------------------------
 static constexpr int PIN_BUTTON_DRIVE_ENABLE = 33;
 static constexpr int PIN_BUTTON_AUTO_MODE = 35;
+// Onboard ESP32 DevKit BOOT button (GPIO 0, active LOW with internal pull-up)
+static constexpr int PIN_BUTTON_BOOT = 0;
 
 // ---------------------------------------------------------------------------
 // Pins — LEDs (digital outputs; not used for analogRead)

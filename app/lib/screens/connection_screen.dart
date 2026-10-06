@@ -204,7 +204,7 @@ class _ConnectionScreenState extends ConsumerState<ConnectionScreen> with Ticker
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      "Join Wi-Fi CartRobot_Setup. The app keeps retrying if the link drops.",
+                      "Robot Hotspot: CartRobot_Setup • Password: cartsetup\nButton Reset: Hold ESP32 BOOT (GPIO 0) or BTN1 for 2s",
                       textAlign: TextAlign.center,
                       style: AppTheme.monoData(11, color: AppTheme.kTextPri),
                     ),

@@ -110,9 +110,10 @@ The robot supports both **Soft AP (Hotspot)** mode and **Station (Shared Wi‑Fi
 
 ### 4. Hardware Button Reset to Hotspot Mode (Recovery)
 If the shared Wi‑Fi is unavailable or the credentials change, you can instantly revert the robot back to Hotspot mode without a computer:
-- **Fast 4-Second Button Reset**: Press and hold **Button 1** (`PIN_BUTTON_DRIVE_ENABLE`) for **>= 4 seconds**. The buzzer will sound two confirmation beeps and the LCD will display `WIFI RESET -> HOTSPOT AP`. All stored Wi-Fi credentials in NVS are cleared and the robot immediately boots its standalone hotspot (`192.168.4.1`). *(Short press continues to toggle motor drive enable as usual).*
-- **LCD Menu Reset**: Press and hold **Button 2** (`PIN_BUTTON_AUTO_MODE`) for 3 seconds to open the Onboard Setup Menu. Item 1 is `1.RESET HOTSPOT`. Short-press Button 2 to execute the reset.
-- **In-App Reset**: Tapping "Reset Robot to Hotspot" in the Wi-Fi Setup sheet sends a reset command.
+- **ESP32 On-board BOOT Button (GPIO 0)**: Press and hold the **BOOT button** on the ESP32 DevKit board for **>= 800ms**. The buzzer will beep and the LCD will display `HOTSPOT RESET`. Stored Wi-Fi credentials in NVS are cleared and the robot immediately boots standalone Hotspot (`CartRobot_Setup` at `192.168.4.1`, password `cartsetup`).
+- **Button 1 (GPIO 33)**: Press and hold **Button 1** (`PIN_BUTTON_DRIVE_ENABLE`) for **>= 1.8 seconds**. Beeps and resets to Hotspot. *(Short tap continues to toggle motor drive enable instantly).*
+- **Button 2 (GPIO 35)**: If wired, press and hold for 3 seconds to open the Onboard Setup Menu on the LCD (`1.RESET HOTSPOT`). Short tap toggles Auto Mode.
+- **In-App Reset**: Tapping "Reset Robot to Hotspot" in the Wi-Fi Setup sheet sends `wifi_reset`.
 
 ---
 

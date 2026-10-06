@@ -68,54 +68,70 @@ static float readPotSensitivity() {
 static uint32_t s_btn1DownAt = 0;
 static bool s_btn1HoldArmed = false;
 
-static void serviceButton(int pin, bool &lastRaw, uint32_t &lastChangeMs, bool &stable,
-                          void (*onPressed)()) {
-  const bool raw = digitalRead(pin) == HIGH;
-  const uint32_t now = millis();
-  if (raw != lastRaw) {
-    lastRaw = raw;
-    lastChangeMs = now;
-  }
-  if ((now - lastChangeMs) >= BUTTON_DEBOUNCE_MS && raw != stable) {
-    stable = raw;
-    if (!stable) {
-      onPressed();
+static void onButton1Pressed();
+static void onButton2Pressed();
+
+static void serviceButtons(uint32_t now) {
+  // 1. BOOT button (GPIO 0) — onboard ESP32 devkit button
+  const bool bootPressed = (digitalRead(PIN_BUTTON_BOOT) == LOW);
+  static bool s_bootLast = false;
+  static uint32_t s_bootDownAt = 0;
+  static bool s_bootResetTriggered = false;
+
+  if (bootPressed != s_bootLast) {
+    s_bootLast = bootPressed;
+    if (bootPressed) {
+      s_bootDownAt = now;
+      s_bootResetTriggered = false;
+      Serial.println("[BTN] BOOT (GPIO 0) DOWN");
+    } else {
+      Serial.println("[BTN] BOOT (GPIO 0) UP");
+      s_bootDownAt = 0;
     }
   }
-}
 
-static void onButton1Pressed();
-
-static void serviceButton1(uint32_t now) {
-  const bool raw = digitalRead(PIN_BUTTON_DRIVE_ENABLE) == HIGH;
-  if (raw != s_btn1LastRaw) {
-    s_btn1LastRaw = raw;
-    s_btn1LastChangeMs = now;
+  if (bootPressed && !s_bootResetTriggered && s_bootDownAt != 0 && (now - s_bootDownAt) >= 800) {
+    s_bootResetTriggered = true;
+    Serial.println("[BTN] BOOT button hold -> RESET TO HOTSPOT!");
+    buzzerBeep(180);
+    webserverResetToHotspot();
+    lcdNotice("HOTSPOT RESET", "BOOT btn hold");
   }
-  if ((now - s_btn1LastChangeMs) >= BUTTON_DEBOUNCE_MS && raw != s_btn1Stable) {
-    s_btn1Stable = raw;
-    if (!s_btn1Stable) {
-      s_btn1DownAt = now;
-      s_btn1HoldArmed = false;
+
+  // 2. Button 1 (GPIO 33: Drive Enable / Hold for Hotspot Reset)
+  const bool b1Pressed = (digitalRead(PIN_BUTTON_DRIVE_ENABLE) == LOW);
+  static bool s_b1Last = false;
+  static uint32_t s_b1DownAt = 0;
+  static bool s_b1ResetTriggered = false;
+
+  if (b1Pressed != s_b1Last) {
+    s_b1Last = b1Pressed;
+    if (b1Pressed) {
+      s_b1DownAt = now;
+      s_b1ResetTriggered = false;
+      Serial.println("[BTN] BTN1 (GPIO 33) DOWN");
     } else {
-      if (s_btn1DownAt != 0 && !s_btn1HoldArmed) {
+      Serial.println("[BTN] BTN1 (GPIO 33) UP");
+      if (!s_b1ResetTriggered && s_b1DownAt != 0 && (now - s_b1DownAt) >= BUTTON_DEBOUNCE_MS) {
         onButton1Pressed();
       }
-      s_btn1DownAt = 0;
-      s_btn1HoldArmed = false;
+      s_b1DownAt = 0;
+      s_b1ResetTriggered = false;
     }
   }
 
-  // Check 4-second hold on BTN1 outside menu to reset to hotspot
-  if (!s_btn1Stable && s_btn1DownAt != 0 && !s_btn1HoldArmed) {
-    if ((now - s_btn1DownAt) >= 4000) {
-      s_btn1HoldArmed = true;
-      Serial.println("[BTN1] 4s long hold: Resetting to Hotspot!");
-      webserverResetToHotspot();
-      lcdNotice("HOTSPOT RESET", "BTN1 long hold");
-    }
+  if (b1Pressed && !s_b1ResetTriggered && s_b1DownAt != 0 && (now - s_b1DownAt) >= 1800) {
+    s_b1ResetTriggered = true;
+    Serial.println("[BTN] BTN1 2s hold -> RESET TO HOTSPOT!");
+    buzzerBeep(180);
+    webserverResetToHotspot();
+    lcdNotice("HOTSPOT RESET", "BTN1 hold 2s");
   }
+
+  // 3. Button 2 (GPIO 35: Auto Mode / LCD Setup Menu)
+  boardMenuTick(now, onButton2Pressed);
 }
+
 
 static void onButton1Pressed() {
   if (!takeStateMutex()) {
@@ -270,10 +286,7 @@ static void taskControlCore1(void *param) {
 
     const float sensitivity = readPotSensitivity();
 
-    boardMenuTick(now, onButton2Pressed);
-    if (!boardMenuIsActive()) {
-      serviceButton1(now);
-    }
+    serviceButtons(now);
 
     consumePendingRoute();
 
@@ -487,6 +500,7 @@ void setup() {
   routeInit();
   autoModeInit();
 
+  pinMode(PIN_BUTTON_BOOT, INPUT_PULLUP);
   pinMode(PIN_BUTTON_DRIVE_ENABLE, INPUT_PULLUP);
   // GPIO35 cannot use the internal pull-up; the 10k to 3.3V does that job.
   pinMode(PIN_BUTTON_AUTO_MODE, INPUT);

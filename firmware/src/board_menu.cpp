@@ -42,6 +42,8 @@ static void debounce(bool rawHigh, bool &lastRaw, uint32_t &lastChangeMs, bool &
   }
 }
 
+static bool s_b2EverHigh = false;
+
 void boardMenuInit() {
   s_inMenu = false;
   s_item = 0;
@@ -52,6 +54,7 @@ void boardMenuInit() {
   s_ignoreNextB2Release = false;
   s_b1Stable = true;
   s_b1LastRaw = true;
+  s_b2EverHigh = false;
 }
 
 bool boardMenuIsActive() {
@@ -78,6 +81,14 @@ void boardMenuGetLines(char line1[17], char line2[17]) {
 
 void boardMenuTick(uint32_t now, void (*onAutoShortPress)()) {
   const bool rawB2High = digitalRead(PIN_BUTTON_AUTO_MODE) == HIGH;
+  if (rawB2High) {
+    s_b2EverHigh = true;
+  }
+  if (!s_b2EverHigh) {
+    // Pin 35 has no internal pullup. If floating or disconnected, ignore it.
+    return;
+  }
+
   debounce(rawB2High, s_b2LastRaw, s_b2LastChangeMs, s_b2Stable);
   const bool b2Down = !s_b2Stable;
 
