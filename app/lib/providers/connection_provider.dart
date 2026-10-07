@@ -58,6 +58,9 @@ class ConnectionNotifier extends StateNotifier<ConnectionUiState> {
           SocketStatus.disconnected => ConnectionStatus.disconnected,
         },
       );
+      if (status == SocketStatus.connecting) {
+        _connectingSince = DateTime.now();
+      }
     });
     _errorSub = service.errors.listen((String? error) {
       if (error == null || error.isEmpty) {
@@ -87,6 +90,18 @@ class ConnectionNotifier extends StateNotifier<ConnectionUiState> {
     });
     unawaited(connect(settings.ip, settings.port));
 
+    _retryLoop = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (service.currentStatus == SocketStatus.connected) {
+        return;
+      }
+      if (service.currentStatus == SocketStatus.connecting &&
+          DateTime.now().difference(_connectingSince) < const Duration(seconds: 8)) {
+        return;
+      }
+      final ControlSettings s = ref.read(settingsProvider);
+      unawaited(connect(s.ip, s.port, force: true));
+    });
+
     _netSub = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
       final bool online = results.any(
         (ConnectivityResult r) =>
@@ -94,15 +109,16 @@ class ConnectionNotifier extends StateNotifier<ConnectionUiState> {
             r == ConnectivityResult.mobile ||
             r == ConnectivityResult.ethernet,
       );
-      if (!online) {
+      if (!online || service.currentStatus == SocketStatus.connected) {
         return;
       }
-      if (state.status != ConnectionStatus.disconnected) {
-        return;
-      }
-      Future<void>.delayed(const Duration(milliseconds: 600), () {
+      _netRetry?.cancel();
+      _netRetry = Timer(const Duration(milliseconds: 1000), () {
+        if (service.currentStatus == SocketStatus.connected) {
+          return;
+        }
         final ControlSettings s = ref.read(settingsProvider);
-        unawaited(connect(s.ip, s.port));
+        unawaited(connect(s.ip, s.port, force: true));
       });
     });
   }
@@ -113,28 +129,60 @@ class ConnectionNotifier extends StateNotifier<ConnectionUiState> {
   StreamSubscription<String?>? _errorSub;
   StreamSubscription<int?>? _latencySub;
   StreamSubscription<List<ConnectivityResult>>? _netSub;
+  Timer? _netRetry;
+  Timer? _retryLoop;
+  Future<void>? _inflight;
+  int _attempt = 0;
+  DateTime _connectingSince = DateTime.fromMillisecondsSinceEpoch(0);
 
-  Future<void> connect(String host, int port) async {
+  Future<void> connect(String host, int port, {bool force = false}) {
     final String h = host.trim();
+    final bool sameTarget = state.host == h && state.port == port;
+    final bool busy = service.currentStatus == SocketStatus.connecting ||
+        service.currentStatus == SocketStatus.connected;
+    if (!force && sameTarget && busy && _inflight != null) {
+      return _inflight!;
+    }
+    final int attempt = ++_attempt;
+    final Future<void> task = _open(h, port, attempt);
+    _inflight = task;
+    return task;
+  }
+
+  Future<void> _open(String host, int port, int attempt) async {
     state = state.copyWith(
-      host: h,
+      host: host,
       port: port,
       status: ConnectionStatus.connecting,
       clearError: true,
     );
     try {
-      await service.disconnect(publishStatus: false);
-      await service.connect(host: h, port: port);
+      if (service.currentStatus != SocketStatus.disconnected) {
+        await service.disconnect(publishStatus: false);
+      }
+      if (attempt != _attempt) {
+        return;
+      }
+      await service.connect(host: host, port: port);
     } catch (e) {
+      if (attempt != _attempt) {
+        return;
+      }
       state = state.copyWith(
         status: ConnectionStatus.disconnected,
         lastError: e.toString(),
       );
+    } finally {
+      if (attempt == _attempt) {
+        _inflight = null;
+      }
     }
   }
 
   @override
   void dispose() {
+    _netRetry?.cancel();
+    _retryLoop?.cancel();
     _statusSub?.cancel();
     _errorSub?.cancel();
     _latencySub?.cancel();

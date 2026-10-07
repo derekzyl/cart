@@ -11,6 +11,7 @@ class ControlSettings {
     required this.ip,
     required this.port,
     required this.defaultNavLedsOnConnect,
+    required this.holdSteer,
   });
 
   final double deadZonePx;
@@ -19,6 +20,8 @@ class ControlSettings {
   final String ip;
   final int port;
   final bool defaultNavLedsOnConnect;
+  /// When true, the wheel stays where the stick was released until it is dragged back to center.
+  final bool holdSteer;
 
   ControlSettings copyWith({
     double? deadZonePx,
@@ -27,6 +30,7 @@ class ControlSettings {
     String? ip,
     int? port,
     bool? defaultNavLedsOnConnect,
+    bool? holdSteer,
   }) {
     return ControlSettings(
       deadZonePx: deadZonePx ?? this.deadZonePx,
@@ -35,6 +39,7 @@ class ControlSettings {
       ip: ip ?? this.ip,
       port: port ?? this.port,
       defaultNavLedsOnConnect: defaultNavLedsOnConnect ?? this.defaultNavLedsOnConnect,
+      holdSteer: holdSteer ?? this.holdSteer,
     );
   }
 
@@ -45,6 +50,7 @@ class ControlSettings {
     ip: "192.168.4.1",
     port: 8080,
     defaultNavLedsOnConnect: true,
+    holdSteer: false,
   );
 }
 
@@ -66,6 +72,7 @@ class SettingsNotifier extends StateNotifier<ControlSettings> {
       port: _prefs!.getInt("port") ?? ControlSettings.defaults.port,
       defaultNavLedsOnConnect:
           _prefs!.getBool("defaultNavLedsOnConnect") ?? ControlSettings.defaults.defaultNavLedsOnConnect,
+      holdSteer: _prefs!.getBool("holdSteer") ?? ControlSettings.defaults.holdSteer,
     );
   }
 
@@ -79,6 +86,7 @@ class SettingsNotifier extends StateNotifier<ControlSettings> {
     await prefs.setString("ip", next.ip);
     await prefs.setInt("port", next.port);
     await prefs.setBool("defaultNavLedsOnConnect", next.defaultNavLedsOnConnect);
+    await prefs.setBool("holdSteer", next.holdSteer);
   }
 
   Future<void> reset() => update(ControlSettings.defaults);

@@ -96,7 +96,7 @@ static void persistLibrary() {
     at += 2;
     for (size_t s = 0; s < kSlotSteps; ++s) {
       blob[at++] = s_saved[i].steps[s].drive;
-      const int16_t steer = s_saved[i].steps[s].steer_pwm;
+      const int16_t steer = s_saved[i].steps[s].steer_deg_x10;
       memcpy(blob + at, &steer, 2);
       at += 2;
       uint32_t dur = s_saved[i].steps[s].duration_ms;
@@ -110,7 +110,7 @@ static void persistLibrary() {
   }
   Preferences prefs;
   if (prefs.begin("cart_rt", false)) {
-    prefs.putBytes("lib", blob, at);
+    prefs.putBytes("lib2", blob, at);
     prefs.end();
   }
   rebuildCsv();
@@ -124,9 +124,9 @@ static void loadLibrary() {
     return;
   }
   const size_t expect = kSlots * (13 + 2 + kSlotSteps * 5);
-  if (prefs.getBytesLength("lib") == expect) {
+  if (prefs.getBytesLength("lib2") == expect) {
     uint8_t blob[expect];
-    prefs.getBytes("lib", blob, expect);
+    prefs.getBytes("lib2", blob, expect);
     size_t at = 0;
     for (int i = 0; i < kSlots; ++i) {
       memcpy(s_saved[i].name, blob + at, 13);
@@ -147,7 +147,7 @@ static void loadLibrary() {
         uint16_t d16 = 0;
         memcpy(&d16, blob + at, 2);
         at += 2;
-        s_saved[i].steps[s].steer_pwm = steer;
+        s_saved[i].steps[s].steer_deg_x10 = steer;
         s_saved[i].steps[s].duration_ms = d16;
       }
     }
@@ -219,13 +219,13 @@ static void pushOrMerge(uint8_t drive, int16_t steer, uint32_t addMs) {
   }
   if (s_count == 0) {
     s_steps[0].drive = drive;
-    s_steps[0].steer_pwm = steer;
+    s_steps[0].steer_deg_x10 = steer;
     s_steps[0].duration_ms = addMs;
     s_count = 1;
     return;
   }
   RouteStep &last = s_steps[s_count - 1];
-  if (last.drive == drive && last.steer_pwm == steer) {
+  if (last.drive == drive && last.steer_deg_x10 == steer) {
     last.duration_ms += addMs;
     return;
   }
@@ -234,7 +234,7 @@ static void pushOrMerge(uint8_t drive, int16_t steer, uint32_t addMs) {
   }
   RouteStep &n = s_steps[s_count];
   n.drive = drive;
-  n.steer_pwm = steer;
+  n.steer_deg_x10 = steer;
   n.duration_ms = addMs;
   s_count += 1;
 }
@@ -303,15 +303,17 @@ static uint8_t flipDrive(uint8_t d) {
   return 0;
 }
 
-static void decodeStep(const RouteStep &st, bool reverse, DriveCmd &outD, SteerCmd &outS,
-                       uint8_t &outPwm) {
+static void decodeStep(const RouteStep &st, bool reverse, DriveCmd &outD, float &outAngle) {
   uint8_t d = st.drive;
-  int16_t sp = st.steer_pwm;
+  int tenths = static_cast<int>(st.steer_deg_x10);
+  if (tenths < 0) {
+    tenths = 0;
+  }
+  tenths %= 3600;
   if (reverse) {
     d = flipDrive(d);
-    sp = static_cast<int16_t>(-sp);
+    tenths = (3600 - tenths) % 3600;
   }
-
   if (d == 1) {
     outD = DriveCmd::Forward;
   } else if (d == 2) {
@@ -319,43 +321,10 @@ static void decodeStep(const RouteStep &st, bool reverse, DriveCmd &outD, SteerC
   } else {
     outD = DriveCmd::Stop;
   }
-
-  if (sp < 0) {
-    outS = SteerCmd::Left;
-    int m = -static_cast<int>(sp);
-    if (m > 255) {
-      m = 255;
-    }
-    outPwm = static_cast<uint8_t>(m);
-  } else if (sp > 0) {
-    outS = SteerCmd::Right;
-    int m = static_cast<int>(sp);
-    if (m > 255) {
-      m = 255;
-    }
-    outPwm = static_cast<uint8_t>(m);
-  } else {
-    outS = SteerCmd::Center;
-    outPwm = 0;
-  }
+  outAngle = static_cast<float>(tenths) / 10.0f;
 }
 
-static void applySensitivitySteer(SteerCmd &st, uint8_t &pwm, float sensitivity) {
-  if (pwm == 0 || st == SteerCmd::Center) {
-    return;
-  }
-  float m = static_cast<float>(pwm) * sensitivity;
-  int im = static_cast<int>(lroundf(m));
-  if (im > 255) {
-    im = 255;
-  }
-  if (im < 0) {
-    im = 0;
-  }
-  pwm = static_cast<uint8_t>(im);
-}
-
-void routeTickRecord(uint32_t nowMs, DriveCmd d, int16_t steerSigned, bool motorsActive) {
+void routeTickRecord(uint32_t nowMs, DriveCmd d, int16_t steerDegX10, bool motorsActive) {
   if (s_state != RouteFsm::Recording || s_steps == nullptr) {
     return;
   }
@@ -373,12 +342,13 @@ void routeTickRecord(uint32_t nowMs, DriveCmd d, int16_t steerSigned, bool motor
   } else if (d == DriveCmd::Reverse) {
     enc = 2;
   }
-  pushOrMerge(enc, steerSigned, ROUTE_SAMPLE_MS);
+  pushOrMerge(enc, steerDegX10, ROUTE_SAMPLE_MS);
 }
 
-void routeTickPlay(uint32_t nowMs, float sensitivity, DriveCmd &outDrive, SteerCmd &outSteer,
-                   uint8_t &outPwm, bool &isPlaying) {
+void routeTickPlay(uint32_t nowMs, DriveCmd &outDrive, float &outAngleDeg, bool &haveAngle,
+                   bool &isPlaying) {
   isPlaying = false;
+  haveAngle = false;
   if (s_state != RouteFsm::Playing && s_state != RouteFsm::PlayingReverse) {
     return;
   }
@@ -401,8 +371,6 @@ void routeTickPlay(uint32_t nowMs, float sensitivity, DriveCmd &outDrive, SteerC
         routeStopPlaybackInternal();
         isPlaying = false;
         outDrive = DriveCmd::Stop;
-        outSteer = SteerCmd::Center;
-        outPwm = 0;
         return;
       }
       s_playIndex -= 1;
@@ -412,8 +380,6 @@ void routeTickPlay(uint32_t nowMs, float sensitivity, DriveCmd &outDrive, SteerC
         routeStopPlaybackInternal();
         isPlaying = false;
         outDrive = DriveCmd::Stop;
-        outSteer = SteerCmd::Center;
-        outPwm = 0;
         return;
       }
     }
@@ -421,8 +387,8 @@ void routeTickPlay(uint32_t nowMs, float sensitivity, DriveCmd &outDrive, SteerC
   }
 
   const RouteStep &active = s_steps[s_playIndex];
-  decodeStep(active, s_reversePlay, outDrive, outSteer, outPwm);
-  applySensitivitySteer(outSteer, outPwm, sensitivity);
+  decodeStep(active, s_reversePlay, outDrive, outAngleDeg);
+  haveAngle = true;
 }
 
 RouteFsm routeGetState() {

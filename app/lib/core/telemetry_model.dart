@@ -7,7 +7,7 @@ enum RouteState { idle, recording, playing, playingReverse }
 class Telemetry {
   const Telemetry({
     required this.distCm,
-    required this.steerPwm,
+    required this.steerAngle,
     required this.drive,
     required this.enabled,
     required this.auto,
@@ -30,7 +30,7 @@ class Telemetry {
   });
 
   final int distCm;
-  final int steerPwm;
+  final double steerAngle;
   final DriveState drive;
   final bool enabled;
   final bool auto;
@@ -53,7 +53,7 @@ class Telemetry {
 
   static const Telemetry initial = Telemetry(
     distCm: -1,
-    steerPwm: 0,
+    steerAngle: 0,
     drive: DriveState.stop,
     enabled: false,
     auto: false,
@@ -102,7 +102,7 @@ class Telemetry {
         final int raw = intVal(json["dist_cm"], -1);
         return raw < 0 ? -1 : raw.clamp(0, 9999);
       }(),
-      steerPwm: intVal(json["steer_pwm"], 0).clamp(0, 255),
+      steerAngle: dblVal(json["steer_angle"], 0).clamp(-360.0, 360.0),
       drive: switch (driveRaw) {
         "fwd" => DriveState.fwd,
         "rev" => DriveState.rev,

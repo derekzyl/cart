@@ -37,20 +37,40 @@ static constexpr uint32_t TELEMETRY_INTERVAL_MS = 100;
 static constexpr uint32_t WATCHDOG_NO_MESSAGE_MS = 8000;
 
 // ---------------------------------------------------------------------------
-// Pins — BTS7960
-// ---------------------------------------------------------------------------
-static constexpr int PIN_BTS7960_RPWM = 18;
-static constexpr int PIN_BTS7960_LPWM = 19;
-static constexpr int PIN_BTS7960_EN = 4;
-
-// ---------------------------------------------------------------------------
-// Pins — drive relays
+// Pins — drive relays (do not retune; forward/reverse already works)
 // ---------------------------------------------------------------------------
 static constexpr int PIN_RELAY_A = 16;
 static constexpr int PIN_RELAY_B = 17;
 
 // ---------------------------------------------------------------------------
-// Pins — I2C LCD (if blank, try SDA=4 SCL=15 or match your working sketch)
+// Pins — steering relays. Same-state (both on or both off) is 0 V, rest.
+// Different state runs the motor. GPIO 4 is this relay, not an I2C pin.
+// ---------------------------------------------------------------------------
+static constexpr int PIN_STEER_RELAY_RIGHT = 18;
+static constexpr int PIN_STEER_RELAY_LEFT = 4;
+// false: rest is both relays de-energized. true: rest is both energized.
+static constexpr bool STEER_REST_BOTH_ON = false;
+// true: a relay module that turns on when the GPIO is low.
+static constexpr bool RELAY_ACTIVE_LOW = false;
+
+// Commands are signed degrees from center: negative left, positive right.
+// The wheel only swings ±30°. Pulses stay short so a bad estimate cannot
+// run from the left stop through center and into the right stop.
+static constexpr float STEER_RIGHT_DEG_PER_SEC = 200.0f;
+static constexpr float STEER_LEFT_DEG_PER_SEC = 200.0f;
+// Stop to stop. Each side is half of this. Kept short on purpose.
+static constexpr uint32_t STEER_FULL_TRAVEL_MS = 240;
+// The wheel only swings from 330° (left) through 0° to 30° (right).
+static constexpr float STEER_MIN_ANGLE_DEG = 330.0f;
+static constexpr float STEER_MAX_ANGLE_DEG = 30.0f;
+static constexpr float STEER_CENTRE_TRIM_DEG = 0.0f;
+static constexpr uint32_t STEER_DEADTIME_MS = 40;
+static constexpr float STEER_STRAIGHT_DEADBAND_DEG = 3.0f;
+// Wheel degrees. A smaller stick shift does not energize the L-R relays.
+static constexpr float STEER_MIN_MOVE_DEG = 8.0f;
+
+// ---------------------------------------------------------------------------
+// Pins — I2C LCD (SDA 21 / SCL 22. GPIO 4 is the left steering relay.)
 // ---------------------------------------------------------------------------
 static constexpr int PIN_I2C_SDA = 21;
 static constexpr int PIN_I2C_SCL = 22;
@@ -112,12 +132,6 @@ static constexpr bool LED_GPIO_ACTIVE_LOW = true;
 static constexpr int PIN_BUZZER = 32;
 
 // ---------------------------------------------------------------------------
-// LEDC steering
-// ---------------------------------------------------------------------------
-static constexpr uint32_t LEDC_STEER_FREQ_HZ = 20000;
-static constexpr uint8_t LEDC_STEER_RESOLUTION_BITS = 8;
-
-// ---------------------------------------------------------------------------
 // Timings
 // ---------------------------------------------------------------------------
 static constexpr uint32_t ULTRASONIC_TIMER_PERIOD_MS = 60;
@@ -137,13 +151,13 @@ static constexpr uint32_t AUTO_AVOID_FORWARD_MS = 800;
 static constexpr uint32_t AUTO_RESUME_STEER_MS = 400;
 
 // ---------------------------------------------------------------------------
-// Pot → sensitivity
+// Pot → maximum steering reach (fraction of the 180° half-turn the stick may command)
 // ---------------------------------------------------------------------------
 static constexpr int POT_ADC_SAMPLES = 8;
 static constexpr int POT_ADC_MIN = 0;
 static constexpr int POT_ADC_MAX = 4095;
-static constexpr float STEER_SENSITIVITY_MIN = 0.1f;
-static constexpr float STEER_SENSITIVITY_MAX = 2.0f;
+static constexpr float STEER_POT_MIN = 0.15f;
+static constexpr float STEER_POT_MAX = 1.0f;
 
 static constexpr uint8_t DEFAULT_COMMANDED_SPEED_PWM = 200;
 
@@ -170,7 +184,7 @@ enum class PendingRouteAction : uint8_t {
 
 struct RouteStep {
   uint8_t drive;
-  int16_t steer_pwm;
+  int16_t steer_deg_x10;
   uint32_t duration_ms;
 };
 
@@ -184,7 +198,6 @@ struct SharedRobotState {
 
   DriveCmd driveCmd;
   SteerCmd steerCmd;
-  uint8_t steerPwmRaw;
   uint8_t lastCommandedSpeedPwm;
 
   uint32_t lastWsMessageMs;
@@ -195,7 +208,7 @@ struct SharedRobotState {
   char pendingRouteName[13];
 
   int telemetryDistCm;
-  uint8_t telemetrySteerPwm;
+  float telemetrySteerAngle;
   SteerCmd telemetrySteer;
   DriveCmd telemetryDrive;
   bool telemetryEnabled;

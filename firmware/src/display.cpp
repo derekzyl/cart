@@ -216,6 +216,14 @@ void displayRedrawHardware() {
   if (s_lcd == nullptr) {
     return;
   }
+  // Wi-Fi can leave the I2C peripheral half-configured. Re-bind the pins and
+  // bail in one short transaction if the backpack does not answer, so a dead
+  // bus cannot freeze the control task on the boot IP screen.
+  wireBeginLcd();
+  if (!i2cDeviceResponds(s_lcdAddr)) {
+    s_lastDrawMs = millis();
+    return;
+  }
   char row1[17];
   char row2[17];
   padLine(row1, s_line1);
@@ -284,17 +292,33 @@ void displayShowWifiResetHotspot() {
   displayRedrawHardware();
 }
 
-void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sensitivity,
+void displayShowNormal(int steerDeg, DriveCmd drive, float distCm, float sensitivity,
                        bool wsConnected, bool motorEnabled, bool autoMode) {
   s_wifiNoticeUntilMs = 0;
 
   static uint32_t s_lastPageSwitchMs = 0;
   static uint8_t s_page = 0;
+  static bool s_pageReady = false;
+  static bool s_prevB1 = false;
+  static bool s_prevB2 = false;
 
   const uint32_t now = millis();
-  if (now - s_lastPageSwitchMs >= 2500) {
+  const bool b1Down = buttonDriveIsPressed();
+  const bool b2Down = digitalRead(PIN_BUTTON_AUTO_MODE) == LOW;
+  if (!s_pageReady) {
+    s_pageReady = true;
     s_lastPageSwitchMs = now;
-    s_page = (s_page + 1) % 3;
+    s_page = 0;
+  }
+  // A press jumps straight to the live status page so it is visible at once.
+  if (b1Down != s_prevB1 || b2Down != s_prevB2) {
+    s_prevB1 = b1Down;
+    s_prevB2 = b2Down;
+    s_page = 0;
+    s_lastPageSwitchMs = now;
+  } else if (now - s_lastPageSwitchMs >= 2000) {
+    s_lastPageSwitchMs = now;
+    s_page = static_cast<uint8_t>((s_page + 1) % 3);
   }
 
   char l1[17];
@@ -302,7 +326,27 @@ void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sen
 
   switch (s_page) {
     case 0: {
-      // Screen 1: Network & IP address
+      // Live defaults: motors, drive, and both buttons.
+      snprintf(l1, sizeof(l1), "MTR:%s AUTO:%s", motorEnabled ? "ON " : "OFF", autoMode ? "ON" : "OFF");
+      int shown = steerDeg % 360;
+      if (shown < 0) {
+        shown += 360;
+      }
+      snprintf(l2, sizeof(l2), "B1:%s B2:%s %3d", b1Down ? "DN" : "UP", b2Down ? "DN" : "UP", shown);
+      break;
+    }
+    case 1: {
+      if (distCm >= 0.0f && distCm <= 400.0f) {
+        snprintf(l1, sizeof(l1), "DIST: %3.0f cm", static_cast<double>(distCm));
+      } else {
+        snprintf(l1, sizeof(l1), "DIST: --- cm");
+      }
+      snprintf(l2, sizeof(l2), "%s WS:%s %.1fx", driveTag(drive), wsConnected ? "ON" : "--",
+               static_cast<double>(sensitivity));
+      break;
+    }
+    case 2:
+    default: {
       webserverRefreshRobotIp();
       const IPAddress ip = webserverRobotIp();
       const bool haveIp = !(ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0);
@@ -316,23 +360,6 @@ void displayShowNormal(uint8_t steerPwm, DriveCmd drive, float distCm, float sen
       } else {
         snprintf(l2, sizeof(l2), "AP  %.12s", WIFI_AP_SSID);
       }
-      break;
-    }
-    case 1: {
-      // Screen 2: Motor, Auto & Steering
-      snprintf(l1, sizeof(l1), "MTR:%s  AUTO:%s", motorEnabled ? "ON" : "OFF", autoMode ? "ON" : "OFF");
-      snprintf(l2, sizeof(l2), "DRV:%-4s STR:%3u", driveTag(drive), steerPwm);
-      break;
-    }
-    case 2:
-    default: {
-      // Screen 3: Ultrasonic Distance & Telemetry
-      if (distCm >= 0.0f && distCm <= 400.0f) {
-        snprintf(l1, sizeof(l1), "DIST: %3.0f cm", static_cast<double>(distCm));
-      } else {
-        snprintf(l1, sizeof(l1), "DIST: --- cm");
-      }
-      snprintf(l2, sizeof(l2), "WS:%s  SEN:%.1fx", wsConnected ? "ON" : "--", static_cast<double>(sensitivity));
       break;
     }
   }
@@ -395,6 +422,11 @@ void displayShowPlayback(uint16_t idx, uint16_t total, float distCm, bool revers
     snprintf(l2, sizeof(l2), "Dst:--cm");
   }
   requestDraw(l1, l2);
+}
+
+void displayRush() {
+  s_lastDrawMs = 0;
+  s_dirty = true;
 }
 
 void displayUpdate() {

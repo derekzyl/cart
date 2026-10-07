@@ -51,7 +51,8 @@ class WebSocketService {
   Timer? _pingTimer;
   DateTime? _lastPingSent;
   bool _manualDisconnect = false;
-  int _reconnectSeconds = 2;
+  int _reconnectSeconds = 1;
+  int _session = 0;
   String _host = "192.168.4.1";
   int _port = 8080;
   DateTime _lastRx = DateTime.fromMillisecondsSinceEpoch(0);
@@ -74,59 +75,62 @@ class WebSocketService {
   SocketStatus currentStatus = SocketStatus.disconnected;
 
   Future<void> connect({required String host, required int port}) async {
+    final int session = ++_session;
     _host = host.trim();
     _port = port;
     _manualDisconnect = false;
-    _reconnectSeconds = 2;
+    _reconnectSeconds = 1;
     _reconnectTimer?.cancel();
     await _cleanupChannel();
+    if (session != _session) return;
     _log("connect requested host=$_host port=$_port");
     // Android often returns no interfaces to untrusted apps. That is not proof
     // the phone is off the robot hotspot, so never abort the connection here.
     unawaited(_logLocalNetworkState());
-    if (Platform.isAndroid) {
-      try {
-        final bool? bound =
-            await const MethodChannel("cart/wifi").invokeMethod<bool>("bindWifi");
-        _log("bound process to Wi-Fi (no-internet hotspot) -> $bound");
-      } catch (e) {
-        _log("bind wifi failed: $e");
-      }
-    }
-    await _connectInternal();
+    if (session != _session) return;
+    await _connectInternal(session);
   }
 
-  Future<void> _connectInternal() async {
-    if (_manualDisconnect) return;
+  Future<void> _bindWifi() async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    try {
+      final bool? bound = await const MethodChannel("cart/wifi")
+          .invokeMethod<bool>("bindWifi", <String, String>{"host": _host});
+      _log("bound process to Wi-Fi -> $bound");
+    } catch (e) {
+      _log("bind wifi failed: $e");
+    }
+  }
+
+  Future<void> _connectInternal(int session) async {
+    if (_manualDisconnect || session != _session) return;
     _setStatus(SocketStatus.connecting);
-    final List<Uri> candidates = <Uri>[
-      Uri.parse("ws://$_host:$_port/ws"),
-      Uri.parse("ws://$_host:$_port/"),
-    ];
+    await _bindWifi();
+    if (_manualDisconnect || session != _session) return;
+    final Uri uri = Uri.parse("ws://$_host:$_port/ws");
     try {
       await _cleanupChannel();
-      Object? lastError;
-      String? lastProbedHost;
-      for (final Uri uri in candidates) {
-        if (_manualDisconnect) return;
-        if (lastProbedHost != uri.host) {
-          lastProbedHost = uri.host;
-          await _probeHealth(uri.host, uri.port);
-        }
-        _log("trying ${uri.toString()}");
-        _errorController.add("Connecting ${uri.host}:${uri.port}${uri.path}…");
-        try {
-          final WebSocketChannel channel = WebSocketChannel.connect(uri);
-          _channel = channel;
-          await channel.ready.timeout(
-            const Duration(seconds: 6),
-            onTimeout: () =>
-                throw TimeoutException("No response from ${uri.host}:${uri.port}${uri.path}"),
-          );
+      if (_manualDisconnect || session != _session) return;
+      _log("trying ${uri.toString()}");
+      _errorController.add("Connecting ${uri.host}:${uri.port}${uri.path}…");
+      try {
+        final WebSocketChannel channel = WebSocketChannel.connect(uri);
+        _channel = channel;
+        await channel.ready.timeout(
+          const Duration(seconds: 8),
+          onTimeout: () =>
+              throw TimeoutException("No response from ${uri.host}:${uri.port}${uri.path}"),
+        );
+          if (session != _session) {
+            await channel.sink.close();
+            return;
+          }
           _sub = channel.stream.listen(
             _handleMessage,
-            onDone: _handleDisconnect,
-            onError: (Object e, StackTrace st) => _handleError(e),
+            onDone: () => _handleDisconnect(session),
+            onError: (Object e, StackTrace st) => _handleError(e, session),
             cancelOnError: true,
           );
           _log("connected ${uri.toString()}");
@@ -134,31 +138,29 @@ class WebSocketService {
           _setStatus(SocketStatus.connected);
           _errorController.add(null);
           _startPing();
-          _reconnectSeconds = 2;
+          _reconnectSeconds = 1;
           return;
-        } catch (e) {
-          _log("failed ${uri.toString()} reason=$e");
-          lastError = e;
-          try {
-            await _channel?.sink.close();
-          } catch (_) {}
-          _channel = null;
-        }
+      } catch (e) {
+        _log("failed ${uri.toString()} reason=$e");
+        try {
+          await _channel?.sink.close();
+        } catch (_) {}
+        _channel = null;
+        rethrow;
       }
-      throw lastError ?? TimeoutException("Could not reach robot at $_host or 192.168.4.1");
     } on TimeoutException catch (e) {
       _log("connect timeout $e");
-      _handleError(e);
+      _handleError(e, session);
     } on WebSocketChannelException catch (e) {
       // Happens on TCP connection refused (robot AP not up yet) or wrong IP.
       _log("connect ws exception $e");
-      _handleError(e);
+      _handleError(e, session);
     } on SocketException catch (e) {
       _log("connect socket exception $e");
-      _handleError(e);
+      _handleError(e, session);
     } catch (e) {
       _log("connect unknown exception $e");
-      _handleError(e);
+      _handleError(e, session);
     }
   }
 
@@ -166,25 +168,6 @@ class WebSocketService {
     if (_isNetworkUnreachable(e)) {
       _reconnectSeconds = 3;
       _log("network unreachable — retry in ${_reconnectSeconds}s");
-    }
-  }
-
-  Future<void> _probeHealth(String host, int port) async {
-    final HttpClient client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
-    try {
-      final Uri uri = Uri.parse("http://$host:$port/health");
-      final HttpClientRequest req = await client.getUrl(uri);
-      req.headers.set(HttpHeaders.acceptHeader, "application/json");
-      final HttpClientResponse res =
-          await req.close().timeout(const Duration(seconds: 3));
-      final String body = await utf8.decoder.bind(res).join();
-      final String preview =
-          body.length > 180 ? "${body.substring(0, 180)}..." : body;
-      _log("health ${uri.toString()} -> ${res.statusCode} ${res.reasonPhrase}; $preview");
-    } catch (e) {
-      _log("health http://$host:$port/health failed: $e");
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -217,7 +200,7 @@ class WebSocketService {
       }
       _channel!.sink.add(jsonEncode(command));
     } catch (_) {
-      _handleDisconnect();
+      _handleDisconnect(_session);
     }
   }
 
@@ -228,7 +211,7 @@ class WebSocketService {
       if (currentStatus != SocketStatus.connected) return;
       if (DateTime.now().difference(_lastRx) > const Duration(seconds: 6)) {
         _log("no data from robot for 6s — reconnecting");
-        _handleDisconnect();
+        _handleDisconnect(_session);
         return;
       }
       _lastPingSent = DateTime.now();
@@ -241,7 +224,8 @@ class WebSocketService {
     if (!_statusController.isClosed) _statusController.add(status);
   }
 
-  void _handleError(Object error) {
+  void _handleError(Object error, int session) {
+    if (session != _session) return;
     _bumpBackoffIfUnreachable(error);
     String message;
     if (error is SocketException) {
@@ -261,11 +245,12 @@ class WebSocketService {
     }
     if (!_errorController.isClosed) _errorController.add(message);
     _log("error: $message");
-    _handleDisconnect();
+    _handleDisconnect(session);
   }
 
-  void _handleDisconnect() {
-    unawaited(_handleDisconnectAsync());
+  void _handleDisconnect(int session) {
+    if (session != _session) return;
+    unawaited(_handleDisconnectAsync(session));
   }
 
   Future<void> _cleanupChannel() async {
@@ -281,14 +266,16 @@ class WebSocketService {
     }
   }
 
-  Future<void> _handleDisconnectAsync() async {
+  Future<void> _handleDisconnectAsync(int session) async {
+    if (session != _session) return;
     await _cleanupChannel();
+    if (session != _session) return;
     _setStatus(SocketStatus.disconnected);
     if (!_latencyController.isClosed) _latencyController.add(null);
     if (_manualDisconnect) return;
 
     _reconnectTimer?.cancel();
-    final int wait = _reconnectSeconds.clamp(2, 8);
+    final int wait = _reconnectSeconds.clamp(1, 4);
     _log("disconnected, retry in ${wait}s");
     if (!_errorController.isClosed) {
       _errorController.add(
@@ -297,15 +284,17 @@ class WebSocketService {
       );
     }
     _reconnectTimer = Timer(Duration(seconds: wait), () {
-      unawaited(_connectInternal());
+      if (session != _session) return;
+      unawaited(_connectInternal(session));
     });
-    _reconnectSeconds = (_reconnectSeconds * 2).clamp(2, 8);
+    _reconnectSeconds = (_reconnectSeconds * 2).clamp(1, 4);
   }
 
   /// Tear down socket. Use [publishStatus] false when immediately calling [connect] again
   /// so the UI does not flash to disconnected.
   Future<void> disconnect({bool publishStatus = true}) async {
     _manualDisconnect = true;
+    _session += 1;
     _reconnectTimer?.cancel();
     final bool hadSocket = _channel != null || _sub != null;
     if (hadSocket) {

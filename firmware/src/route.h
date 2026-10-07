@@ -23,9 +23,9 @@ const char *routeLibraryCsv();
 bool routeDeleteNamed(const char *name);
 bool routeLoadNamed(const char *name);
 
-void routeTickRecord(uint32_t nowMs, DriveCmd d, int16_t steerSigned, bool motorsActive);
-void routeTickPlay(uint32_t nowMs, float sensitivity, DriveCmd &outDrive, SteerCmd &outSteer,
-                   uint8_t &outPwm, bool &isPlaying);
+void routeTickRecord(uint32_t nowMs, DriveCmd d, int16_t steerDegX10, bool motorsActive);
+void routeTickPlay(uint32_t nowMs, DriveCmd &outDrive, float &outAngleDeg, bool &haveAngle,
+                   bool &isPlaying);
 
 RouteFsm routeGetState();
 uint16_t routeGetCurrentIndex();

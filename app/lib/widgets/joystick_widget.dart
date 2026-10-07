@@ -15,6 +15,8 @@ class JoystickWidget extends StatefulWidget {
     required this.rateHz,
     required this.deadZonePx,
     required this.sensitivityOverride,
+    required this.holdSteer,
+    required this.onHoldSteerChanged,
     required this.autoMode,
     required this.enabled,
     required this.onCommand,
@@ -24,6 +26,8 @@ class JoystickWidget extends StatefulWidget {
   final int rateHz;
   final double deadZonePx;
   final double sensitivityOverride;
+  final bool holdSteer;
+  final ValueChanged<bool> onHoldSteerChanged;
   final bool autoMode;
   final bool enabled;
   final ValueChanged<Map<String, dynamic>> onCommand;
@@ -39,6 +43,9 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   double _radius = 1;
   /// True while knob is outside dead zone (user is driving/steering from stick).
   bool _stickWasActive = false;
+  bool _fingerDown = false;
+  /// Finger is up in HOLD. Steer was already sent; only drive keeps refreshing.
+  bool _parked = false;
   String? _lastSteer;
   int? _lastPwm;
   String? _lastMove;
@@ -59,6 +66,9 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     if (oldWidget.rateHz != widget.rateHz) {
       _startTimer();
     }
+    if (oldWidget.holdSteer && !widget.holdSteer && _offset.distance > 1) {
+      _finishDrag();
+    }
   }
 
   void _startTimer() {
@@ -68,55 +78,132 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   }
 
   void _emitDrive(String steer, int pwm, String move) {
-    final bool changed = steer != _lastSteer || pwm != _lastPwm || move != _lastMove;
+    final bool steerChanged = steer != _lastSteer || pwm != _lastPwm;
+    final bool moveChanged = move != _lastMove;
+    final bool heartbeat =
+        DateTime.now().difference(_lastDriveSent) >= const Duration(milliseconds: 800);
+    if (!steerChanged && !moveChanged && !heartbeat) {
+      return;
+    }
+    if (steerChanged) {
+      _lastSteer = steer;
+      _lastPwm = pwm;
+      if (steer == "center" || pwm == 0) {
+        widget.onCommand(RobotCommands.straight());
+      } else {
+        // Left side sends a negative angle. Right side sends a positive angle.
+        // Full stick is the ±30° lock. Pure forward and reverse send no steer.
+        final double signed = steer == "left" ? -1.0 : 1.0;
+        final double angle =
+            (signed * (pwm / 255.0) * 30.0 * widget.sensitivityOverride).clamp(-30.0, 30.0);
+        widget.onCommand(RobotCommands.steerAngle(angle));
+      }
+    }
+    if (moveChanged || heartbeat) {
+      _lastMove = move;
+      _lastDriveSent = DateTime.now();
+      if (move != "stop" || moveChanged) {
+        widget.onCommand(RobotCommands.move(move));
+      }
+    }
+  }
+
+  String _moveFor(double ny) {
+    if (ny > 0.1) {
+      return "fwd";
+    }
+    if (ny < -0.1) {
+      return "rev";
+    }
+    return "stop";
+  }
+
+  void _emitMoveOnly(String move) {
+    final bool changed = move != _lastMove;
     final bool heartbeat =
         DateTime.now().difference(_lastDriveSent) >= const Duration(milliseconds: 800);
     if (!changed && !heartbeat) {
       return;
     }
-    _lastSteer = steer;
-    _lastPwm = pwm;
     _lastMove = move;
     _lastDriveSent = DateTime.now();
-    widget.onCommand(RobotCommands.steer(steer, pwm));
     if (move != "stop" || changed) {
       widget.onCommand(RobotCommands.move(move));
     }
   }
 
   void _emitCommand() {
+    if (_releaseCtrl.isAnimating) {
+      return;
+    }
     final double mag = _offset.distance;
+    final double r = _radius > 0 ? _radius : 1.0;
+    final double normDist = (mag / r).clamp(0.0, 1.0);
+    final double dx = _offset.dx;
+    final double dy = _offset.dy;
+    final double ny = (-dy / r).clamp(-1.0, 1.0);
+
+    if (_parked && !_fingerDown && mag >= widget.deadZonePx) {
+      _emitMoveOnly(_moveFor(ny));
+      return;
+    }
     if (mag < widget.deadZonePx) {
-      // move(stop) is sent only when the command changes, so a Forward hold
-      // is not cancelled by the centered stick.
+      _parked = false;
       if (_stickWasActive) {
         _stickWasActive = false;
+        if (_fingerDown) {
+          _emitMoveOnly("stop");
+        }
       }
-      _emitDrive("center", 0, "stop");
       return;
     }
 
     _stickWasActive = true;
-    final double nx = (_offset.dx / _radius).clamp(-1.0, 1.0);
-    final double ny = (-_offset.dy / _radius).clamp(-1.0, 1.0);
-    final int pwm =
-        ((math.max(nx.abs(), ny.abs()) * 255 * widget.sensitivityOverride)).round().clamp(0, 255);
 
-    final String steer = nx > 0.1
-        ? "right"
-        : nx < -0.1
-            ? "left"
-            : "center";
-    final String move = ny > 0.1
-        ? "fwd"
-        : ny < -0.1
-            ? "rev"
-            : "stop";
+    // Compass heading in degrees: 0° = FWD, 90° = R, 180° = REV, 270° = L
+    double heading = math.atan2(dx, -dy) * (180.0 / math.pi);
+    if (heading < 0) {
+      heading += 360.0;
+    }
+
+    // Straight deadbands around pure forward (0°) and pure reverse (180°)
+    const double straightBand = 14.0;
+    final bool isStraightFwd = heading <= straightBand || heading >= (360.0 - straightBand);
+    final bool isStraightRev = (heading - 180.0).abs() <= straightBand;
+
+    String steer = "center";
+    String move = "stop";
+
+    if (ny > 0.10) {
+      move = "fwd";
+    } else if (ny < -0.10) {
+      move = "rev";
+    }
+
+    if (isStraightFwd) {
+      move = "fwd";
+      steer = "center";
+    } else if (isStraightRev) {
+      move = "rev";
+      steer = "center";
+    } else if (heading > straightBand && heading < (180.0 - straightBand)) {
+      // 0° to 90° (fwd-r) and 90° to 180° (r-rev) -> steer RIGHT
+      steer = "right";
+    } else if (heading > (180.0 + straightBand) && heading < (360.0 - straightBand)) {
+      // 180° to 270° (rev-l) and 270° to 360° (l-fwd) -> steer LEFT
+      steer = "left";
+    }
+
+    // Lateral displacement controls steer strength (0 along straight axis, max at 90° / 270°)
+    final double lateral = math.sin(heading * math.pi / 180.0).abs() * normDist;
+    final int pwm = steer == "center" ? 0 : (lateral * 255).round().clamp(0, 255);
 
     _emitDrive(steer, pwm, move);
   }
 
   void _onDrag(Offset local, Size size) {
+    _fingerDown = true;
+    _parked = false;
     _releaseCtrl.stop();
     _releaseAnim = null;
     final Offset center = Offset(size.width / 2, size.height / 2);
@@ -130,10 +217,24 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   }
 
   void _finishDrag() {
+    _fingerDown = false;
+    if (widget.holdSteer && _offset.distance >= widget.deadZonePx) {
+      _parked = true;
+      return;
+    }
+    _parked = false;
+    widget.onCommand(RobotCommands.move("stop"));
+    _lastMove = "stop";
+    _lastDriveSent = DateTime.now();
+    widget.onCommand(RobotCommands.straight());
+    _lastSteer = "center";
+    _lastPwm = 0;
     final Offset start = _offset;
     _releaseCtrl.reset();
+    // easeOut stays on the same side of center. elasticOut crosses to the
+    // other side and that was sent as a full opposite steer.
     _releaseAnim = Tween<Offset>(begin: start, end: Offset.zero).animate(
-      CurvedAnimation(parent: _releaseCtrl, curve: Curves.elasticOut),
+      CurvedAnimation(parent: _releaseCtrl, curve: Curves.easeOut),
     );
     _releaseAnim!.addListener(_tickRelease);
     _releaseCtrl.forward().whenComplete(() {
@@ -143,7 +244,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
           _offset = Offset.zero;
         });
       }
-      widget.onCommand(RobotCommands.steer("center", 0));
+      widget.onCommand(RobotCommands.straight());
       widget.onCommand(RobotCommands.move("stop"));
     });
   }
@@ -170,6 +271,37 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         const PanelLabel("STEER"),
+        const SizedBox(height: 4),
+        Row(
+          children: <Widget>[
+            Text(
+              "DZ ${widget.deadZonePx.toStringAsFixed(0)}",
+              style: AppTheme.monoData(9, color: AppTheme.kTextNum),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              "REACH ${widget.sensitivityOverride.toStringAsFixed(1)}",
+              style: AppTheme.monoData(9, color: AppTheme.kTextNum),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        GestureDetector(
+          onTap: () => widget.onHoldSteerChanged(!widget.holdSteer),
+          child: ClippedCornerBox(
+            cutSize: 4,
+            backgroundColor: widget.holdSteer ? AppTheme.kWarn.withValues(alpha: 0.22) : AppTheme.kDim,
+            borderColor: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent,
+            topAccentColor: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Center(
+              child: Text(
+                widget.holdSteer ? "HOLD ON" : "HOLD OFF",
+                style: AppTheme.labelUi(12, color: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent),
+              ),
+            ),
+          ),
+        ),
         Expanded(
           child: LayoutBuilder(
             builder: (BuildContext context, BoxConstraints c2) {
@@ -225,12 +357,14 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   }
 
   Offset _playbackOffset(double maxR) {
-    final double steer = switch (widget.telemetry.steerDir) {
-          "left" => -1.0,
-          "right" => 1.0,
-          _ => 0.0,
-        } *
-        (widget.telemetry.steerPwm / 255.0);
+    double shown = widget.telemetry.steerAngle % 360.0;
+    if (shown < 0) {
+      shown += 360.0;
+    }
+    if (shown > 180.0) {
+      shown -= 360.0;
+    }
+    final double steer = (shown / 180.0).clamp(-1.0, 1.0);
     final double drive = switch (widget.telemetry.drive) {
       DriveState.fwd => -1.0,
       DriveState.rev => 1.0,
@@ -377,6 +511,15 @@ class _HexJoystickPainter extends CustomPainter {
     );
 
     canvas.drawCircle(c, 11, Paint()..color = AppTheme.kDim);
+    final double zone = deadZone.clamp(6.0, maxR);
+    canvas.drawCircle(
+      c,
+      zone,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = AppTheme.kAccent.withValues(alpha: 0.45),
+    );
 
     final TextPainter dist = TextPainter(
       text: TextSpan(

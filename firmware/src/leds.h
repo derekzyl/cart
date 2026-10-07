@@ -8,5 +8,5 @@
 void ledsInit();
 void ledsSetNavEnabled(bool enabled);
 void ledsSetHeadlight(bool on);
-void ledsTick(uint32_t nowMs, bool navEnabled, SteerCmd steer, uint8_t steerPwm,
-              bool routeRecording, bool forceAllOff);
+void ledsTick(uint32_t nowMs, bool navEnabled, SteerCmd steer, bool routeRecording,
+              bool forceAllOff);

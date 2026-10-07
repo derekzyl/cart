@@ -1,6 +1,7 @@
 // firmware/src/webserver.cpp
 #include "webserver.h"
 #include "config.h"
+#include "steer.h"
 #include "display.h"
 #include "route.h"
 
@@ -265,10 +266,6 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
     Serial.println("[WSDBG] empty payload");
     return;
   }
-  Serial.printf("[WSDBG] rx %u bytes from client %u: %.80s\n",
-                static_cast<unsigned>(len),
-                static_cast<unsigned>(client ? client->id() : 0U), payload);
-
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
@@ -281,7 +278,11 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
     Serial.println("[WSDBG] missing cmd");
     return;
   }
-  Serial.printf("[WSDBG] cmd=%s\n", cmd);
+  const bool quiet = strcmp(cmd, "ping") == 0 || strcmp(cmd, "move") == 0 || strcmp(cmd, "steer") == 0 ||
+                     strcmp(cmd, "steer_angle") == 0 || strcmp(cmd, "straight") == 0;
+  if (!quiet) {
+    Serial.printf("[WSDBG] cmd=%s\n", cmd);
+  }
 
   if (strcmp(cmd, "ping") == 0) {
     if (takeStateMutex()) {
@@ -295,7 +296,6 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
     const size_t n = serializeJson(reply, buf, sizeof(buf));
     if (n > 0 && n < sizeof(buf)) {
       wsTextAll(buf);
-      Serial.println("[WSDBG] pong broadcast");
     }
     return;
   }
@@ -405,33 +405,24 @@ static void handleWsMessage(AsyncWebSocketClient *client, const char *payload, s
       next = DriveCmd::Stop;
     }
     g_state.driveCmd = next;
-    Serial.printf("[WSDBG] move=%u\n", static_cast<unsigned>(next));
     giveStateMutex();
     return;
   }
 
-  if (strcmp(cmd, "steer") == 0) {
-    const char *dir = doc["dir"];
-    const int pwmIn = doc["pwm"] | 0;
-    const uint8_t pwm = static_cast<uint8_t>(constrain(pwmIn, 0, 255));
-    if (pwm > 0) {
-      g_state.lastCommandedSpeedPwm = pwm;
-    }
-    SteerCmd s = SteerCmd::Center;
-    if (dir != nullptr) {
-      if (strcmp(dir, "left") == 0) {
-        s = SteerCmd::Left;
-      } else if (strcmp(dir, "right") == 0) {
-        s = SteerCmd::Right;
-      } else if (strcmp(dir, "center") == 0) {
-        s = SteerCmd::Center;
+  if (strcmp(cmd, "steer") == 0 || strcmp(cmd, "steer_angle") == 0 || strcmp(cmd, "straight") == 0 ||
+      strcmp(cmd, "recentre") == 0 || strcmp(cmd, "get_calib") == 0 || strcmp(cmd, "set_calib") == 0 ||
+      strcmp(cmd, "calib_jog") == 0 || strcmp(cmd, "calib_measure_start") == 0 ||
+      strcmp(cmd, "calib_measure_stop") == 0 || strcmp(cmd, "calib_set_centre") == 0 ||
+      strcmp(cmd, "calib_save") == 0 || strcmp(cmd, "calib_reset_defaults") == 0) {
+    giveStateMutex();
+    JsonDocument reply;
+    if (steerHandleCommand(doc, reply)) {
+      char buf[480];
+      const size_t n = serializeJson(reply, buf, sizeof(buf));
+      if (n > 0 && n < sizeof(buf)) {
+        wsTextAll(buf);
       }
     }
-    g_state.steerCmd = s;
-    g_state.steerPwmRaw = pwm;
-    Serial.printf("[WSDBG] steer=%u pwm=%u\n", static_cast<unsigned>(s),
-                  static_cast<unsigned>(pwm));
-    giveStateMutex();
     return;
   }
 
@@ -712,7 +703,7 @@ void webserverBroadcastTelemetry() {
 
   JsonDocument doc;
   doc["dist_cm"] = g_state.telemetryDistCm;
-  doc["steer_pwm"] = g_state.telemetrySteerPwm;
+  doc["steer_angle"] = g_state.telemetrySteerAngle;
   const char *steerDir = "center";
   switch (g_state.telemetrySteer) {
     case SteerCmd::Left:

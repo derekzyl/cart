@@ -5,6 +5,7 @@ import "../providers/connection_provider.dart";
 import "../providers/settings_provider.dart";
 import "../theme/app_theme.dart";
 import "shared/clipped_corner_box.dart";
+import "steer_calib_widget.dart";
 import "wifi_setup_sheet.dart";
 
 class SettingsSheetWidget extends ConsumerStatefulWidget {
@@ -101,7 +102,7 @@ class _SettingsSheetWidgetState extends ConsumerState<SettingsSheetWidget> {
                   children: <Widget>[
                     Expanded(
                       child: Text(
-                        "Sensitivity",
+                        "Stick reach",
                         style: AppTheme.labelUi(11, color: AppTheme.kTextSec),
                       ),
                     ),
@@ -158,6 +159,15 @@ class _SettingsSheetWidgetState extends ConsumerState<SettingsSheetWidget> {
                     ],
                   ],
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  "Left side steers left. Right side steers right. HOLD ON leaves the stick there: the wheel moves to that angle, then the steer motor switches off so forward or reverse can continue.",
+                  style: AppTheme.labelUi(10, color: AppTheme.kTextSec),
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1, color: AppTheme.kBorder),
+                const SizedBox(height: 12),
+                const SteerCalibWidget(),
                 const SizedBox(height: 16),
                 const Divider(height: 1, color: AppTheme.kBorder),
                 const SizedBox(height: 12),

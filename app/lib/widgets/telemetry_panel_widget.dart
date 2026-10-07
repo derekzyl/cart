@@ -17,11 +17,14 @@ class TelemetryPanelWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final int signedSteer = switch (telemetry.steerDir) {
-      "left" => -telemetry.steerPwm,
-      "right" => telemetry.steerPwm,
-      _ => 0,
-    };
+    double shown = telemetry.steerAngle % 360.0;
+    if (shown < 0) {
+      shown += 360.0;
+    }
+    if (shown > 180.0) {
+      shown -= 360.0;
+    }
+    final int signedSteer = (shown / 180.0 * 255.0).round();
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,

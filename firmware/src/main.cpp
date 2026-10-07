@@ -12,6 +12,7 @@
 #include "motor.h"
 #include "relay.h"
 #include "route.h"
+#include "steer.h"
 #include "ultrasonic.h"
 #include "webserver.h"
 
@@ -39,6 +40,7 @@ static void lcdNotice(const char *line1, const char *line2) {
   snprintf(s_notice1, sizeof(s_notice1), "%s", line1);
   snprintf(s_notice2, sizeof(s_notice2), "%s", line2);
   s_noticeUntilMs = millis() + 1800;
+  displayRush();
 }
 
 static bool lcdNoticeActive(uint32_t now) {
@@ -47,7 +49,7 @@ static bool lcdNoticeActive(uint32_t now) {
 
 static float readPotSensitivity() {
   if (s_potCount < POT_ADC_SAMPLES) {
-    return STEER_SENSITIVITY_MIN;
+    return STEER_POT_MIN;
   }
   int64_t sum = 0;
   for (int i = 0; i < POT_ADC_SAMPLES; ++i) {
@@ -62,7 +64,7 @@ static float readPotSensitivity() {
   if (t > 1.0f) {
     t = 1.0f;
   }
-  return STEER_SENSITIVITY_MIN + t * (STEER_SENSITIVITY_MAX - STEER_SENSITIVITY_MIN);
+  return STEER_POT_MIN + t * (STEER_POT_MAX - STEER_POT_MIN);
 }
 
 static void onBootPressed();
@@ -162,35 +164,6 @@ static void onButton2Pressed() {
   Serial.printf("[BTN] auto -> %u\n", on ? 1U : 0U);
   giveStateMutex();
   lcdNotice(on ? "AUTO ON" : "AUTO OFF", "BTN2 pressed");
-}
-
-static uint8_t scaleSteerPwm(uint8_t raw, float sensitivity) {
-  int out = static_cast<int>(lroundf(static_cast<float>(raw) * sensitivity));
-  out = constrain(out, 0, 255);
-  return static_cast<uint8_t>(out);
-}
-
-static int16_t steerSignedFromManual(SteerCmd s, uint8_t pwm) {
-  if (pwm == 0 || s == SteerCmd::Center) {
-    return 0;
-  }
-  if (s == SteerCmd::Left) {
-    return static_cast<int16_t>(-static_cast<int16_t>(pwm));
-  }
-  return static_cast<int16_t>(pwm);
-}
-
-static void applySteering(SteerCmd s, uint8_t pwm) {
-  const uint8_t p = pwm;
-  if (p == 0 || s == SteerCmd::Center) {
-    motorSteerCenter();
-    return;
-  }
-  if (s == SteerCmd::Left) {
-    motorSteerLeft(p);
-  } else {
-    motorSteerRight(p);
-  }
 }
 
 static void relayForwardPercent(uint8_t percent, uint32_t nowMs, bool active) {
@@ -314,9 +287,11 @@ static void taskControlCore1(void *param) {
     if (boardMenuIsActive()) {
       motorDisable();
       driveStop();
-      motorSteerCenter();
+      steerHold();
+      steerSetEnabled(false);
+      steerTick(now);
       relayForwardPercent(0, now, false);
-      ledsTick(now, false, SteerCmd::Center, 0, false, true);
+      ledsTick(now, false, SteerCmd::Center, false, true);
       buzzerTick(now, distCm, true);
       char menuL1[17];
       char menuL2[17];
@@ -334,8 +309,6 @@ static void taskControlCore1(void *param) {
     bool buzzMute = false;
     bool watchdog = false;
     DriveCmd wsDrive = DriveCmd::Stop;
-    SteerCmd wsSteer = SteerCmd::Center;
-    uint8_t wsSteerPwm = 0;
     int wsClients = 0;
 
     if (takeStateMutex()) {
@@ -346,22 +319,19 @@ static void taskControlCore1(void *param) {
       buzzMute = g_state.buzzerMuted;
       watchdog = g_state.watchdogTripped;
       wsDrive = g_state.driveCmd;
-      wsSteer = g_state.steerCmd;
-      wsSteerPwm = g_state.steerPwmRaw;
       wsClients = g_state.wsClientCount;
       giveStateMutex();
     }
 
     ledsSetHeadlight(headlight);
     buzzerSetMuted(buzzMute);
+    steerSetCommandScale(sensitivity);
 
     const bool routePlaying =
         (routeGetState() == RouteFsm::Playing || routeGetState() == RouteFsm::PlayingReverse);
     const bool routeRecording = (routeGetState() == RouteFsm::Recording);
 
     DriveCmd appliedDrive = DriveCmd::Stop;
-    SteerCmd appliedSteer = SteerCmd::Center;
-    uint8_t appliedSteerPwm = 0;
     uint8_t appliedFwdPct = 0;
     bool useRelayPercent = false;
     DriveCmd telemDrive = wsDrive;
@@ -369,42 +339,51 @@ static void taskControlCore1(void *param) {
     if (watchdog) {
       motorDisable();
       driveStop();
-      motorSteerCenter();
+      steerHold();
+      steerSetEnabled(false);
       relayForwardPercent(0, now, false);
       routeStopFromCommand();
       autoModeReset();
-      ledsTick(now, navLeds, SteerCmd::Center, 0, routeRecording, true);
+      ledsTick(now, navLeds, SteerCmd::Center, routeRecording, true);
       buzzerTick(now, distCm, true);
       telemDrive = DriveCmd::Stop;
-      appliedSteerPwm = 0;
     } else if (!motorEnabled) {
       motorDisable();
       driveStop();
-      motorSteerCenter();
+      steerHold();
+      steerSetEnabled(false);
       relayForwardPercent(0, now, false);
-      const uint8_t steerVis = scaleSteerPwm(wsSteerPwm, sensitivity);
-      ledsTick(now, navLeds, wsSteer, steerVis, routeRecording, false);
+      ledsTick(now, navLeds, steerDirection(), routeRecording, false);
       buzzerTick(now, distCm, false);
       telemDrive = wsDrive;
-      appliedSteer = wsSteer;
-      appliedSteerPwm = steerVis;
     } else {
       motorEnable();
+      steerSetEnabled(true);
 
       if (routePlaying) {
         bool playing = false;
-        routeTickPlay(now, sensitivity, appliedDrive, appliedSteer, appliedSteerPwm, playing);
-        (void)playing;
+        bool haveAngle = false;
+        float playAngle = 0.0f;
+        routeTickPlay(now, appliedDrive, playAngle, haveAngle, playing);
+        if (playing && haveAngle) {
+          steerCommandAngle(playAngle, false);
+        }
 
         relayForwardPercent(0, now, false);
         applyManualDrive(appliedDrive);
-        applySteering(appliedSteer, appliedSteerPwm);
 
-        ledsTick(now, navLeds, appliedSteer, appliedSteerPwm, routeRecording, false);
+        ledsTick(now, navLeds, steerDirection(), routeRecording, false);
         buzzerTick(now, distCm, false);
         telemDrive = appliedDrive;
       } else if (autoMode) {
-        autoModeTick(now, distCm, appliedDrive, appliedSteer, appliedSteerPwm, appliedFwdPct);
+        float autoAngle = 0.0f;
+        bool wantStraight = false;
+        autoModeTick(now, distCm, appliedDrive, autoAngle, wantStraight, appliedFwdPct);
+        if (wantStraight) {
+          steerStraight();
+        } else {
+          steerCommandAngle(autoAngle, false);
+        }
         if (appliedFwdPct > 0 && appliedFwdPct < 100) {
           useRelayPercent = true;
         }
@@ -418,40 +397,37 @@ static void taskControlCore1(void *param) {
           applyManualDrive(appliedDrive);
         }
 
-        const uint8_t scaledAutoSteer = scaleSteerPwm(appliedSteerPwm, sensitivity);
-        applySteering(appliedSteer, scaledAutoSteer);
-
-        ledsTick(now, navLeds, appliedSteer, scaledAutoSteer, routeRecording, false);
+        ledsTick(now, navLeds, steerDirection(), routeRecording, false);
         buzzerTick(now, distCm, false);
         telemDrive = appliedDrive;
-        appliedSteerPwm = scaledAutoSteer;
       } else {
         autoModeReset();
         relayForwardPercent(0, now, false);
 
         applyManualDrive(wsDrive);
-        applySteering(wsSteer, scaleSteerPwm(wsSteerPwm, sensitivity));
-
         appliedDrive = wsDrive;
-        appliedSteer = wsSteer;
-        appliedSteerPwm = scaleSteerPwm(wsSteerPwm, sensitivity);
         telemDrive = wsDrive;
 
-        ledsTick(now, navLeds, wsSteer, appliedSteerPwm, routeRecording, false);
+        ledsTick(now, navLeds, steerDirection(), routeRecording, false);
         buzzerTick(now, distCm, false);
 
-        const int16_t sig = steerSignedFromManual(wsSteer, wsSteerPwm);
-        routeTickRecord(now, wsDrive, sig, true);
+        routeTickRecord(now, wsDrive, steerAngleTenths(), true);
       }
     }
 
-    const uint8_t telemSteer = watchdog ? 0 : appliedSteerPwm;
+    steerTick(now);
+    // Steering and drive share the battery. While the wheel is shifting,
+    // the forward/reverse relay stays off, then drive resumes.
+    if (steerMotorBusy()) {
+      driveStop();
+      s_fwdPctWindowStart = 0;
+    }
 
     if (takeStateMutex()) {
       const bool distLive = ultrasonicEchoAgeMs() < 1000;
       g_state.telemetryDistCm = distLive ? static_cast<int>(lroundf(distCm)) : -1;
-      g_state.telemetrySteerPwm = telemSteer;
-      g_state.telemetrySteer = watchdog ? SteerCmd::Center : appliedSteer;
+      g_state.telemetrySteerAngle = steerAngleDeg();
+      g_state.telemetrySteer = watchdog ? SteerCmd::Center : steerDirection();
       g_state.telemetryDrive = telemDrive;
       g_state.telemetryEnabled = motorEnabled && !watchdog;
       g_state.telemetryAuto = autoMode;
@@ -479,7 +455,7 @@ static void taskControlCore1(void *param) {
     } else if (autoMode) {
       displayShowAuto(distCm, autoModeGetFsm());
     } else {
-      displayShowNormal(scaleSteerPwm(wsSteerPwm, sensitivity), wsDrive, distCm, sensitivity,
+      displayShowNormal(static_cast<int>(lroundf(steerAngleDeg())), wsDrive, distCm, sensitivity,
                         wsClients > 0, motorEnabled, autoMode);
     }
 
@@ -502,7 +478,6 @@ void setup() {
   g_state.watchdogTripped = false;
   g_state.driveCmd = DriveCmd::Stop;
   g_state.steerCmd = SteerCmd::Center;
-  g_state.steerPwmRaw = 0;
   g_state.telemetrySteer = SteerCmd::Center;
   g_state.lastCommandedSpeedPwm = DEFAULT_COMMANDED_SPEED_PWM;
   g_state.lastWsMessageMs = millis();
@@ -519,6 +494,7 @@ void setup() {
   displayAfterNetworkUp();
 
   motorInit();
+  steerInit();
   relayInit();
   ultrasonicInit();
   ledsInit();

@@ -47,7 +47,8 @@ The phone connects over **Wi‑Fi** using **JSON messages over WebSockets**. Tel
 
 ### On the robot (firmware)
 
-- **Drive**: Forward / reverse via relays; steering via **PWM** (BTS7960-style H-bridge or similar wiring as implemented in `motor.cpp` / `relay.cpp`).
+- **Drive**: Forward / reverse via relays on GPIO 16 and 17.
+- **Steering**: Two relays (GPIO 18 right, GPIO 4 left). Same relay state is stopped. A timed run changes the wheel angle. 0° is straight forward and 180° is straight in reverse.
 - **Enable & auto**: Physical buttons can toggle motor enable and **auto mode** (obstacle-related behavior uses ultrasonic distance).
 - **WebSocket API**: JSON commands for move, steer, enable, auto, LEDs, buzzer, route actions, ping/pong.
 - **Watchdog**: If commands stop arriving for a configured interval, the robot can trip a safety state (see `WATCHDOG_NO_MESSAGE_MS` in `config.h`).
@@ -70,17 +71,27 @@ Pin assignments are centralized in **`firmware/src/config.h`**. Typical groups:
 
 | Subsystem | Notes |
 |-----------|--------|
-| **BTS7960 / motor driver** | RPWM, LPWM, EN pins as defined in config. |
-| **Relays** | Often used for high-level FWD/REV or contactor-style switching. |
-| **Steering** | LEDC PWM at configured frequency/resolution. |
+| **Drive relays** | GPIO 16 and 17. Forward and reverse. |
+| **Steering relays** | GPIO 18 right, GPIO 4 left. Rest is both off (or both on if `STEER_REST_BOTH_ON`). |
 | **HC‑SR04** | Trigger + echo pins; timing limits and “far” distance in config. |
-| **Potentiometer (ADC)** | Maps to **steer sensitivity** range. |
+| **Potentiometer (ADC)** | Limits how far the stick may steer, as a fraction of a half-turn. |
 | **Buttons** | Drive enable, auto mode (with debounce). |
 | **LEDs** | Left/right nav, headlight — **often wired active-low** (LED on when GPIO is **LOW**). See `LED_GPIO_ACTIVE_LOW`. |
 | **Buzzer** | Digital output (active high in config). |
 | **I2C LCD** | PCF8574 backpack; address scan or forced address in config. |
 
 > **Important:** Always align `config.h` with your actual PCB/wiring. Wrong pins or active-low vs active-high assumptions will cause inverted LEDs or dangerous motion.
+
+## Steering calibration
+
+Turn the motors on, then open **Settings → Steering calibration**.
+
+1. Hold **Jog left** or **Jog right** until the wheel points straight forward. Press **Set centre**. That position is 0°. 180° is the same line, with the wheel turned around for reverse.
+2. Press **Start right-end timing** and stop it when the wheel reaches the right end (reverse-straight is 180°). That sets degrees per second on the right relay.
+3. Press **Start left-end timing** and stop it at the left end (through 270°). That sets the left rate.
+4. Press **Save to robot**. The values stay in flash.
+
+**Recentre** drives to one end, then back to 0° for the saved travel time. **Reset defaults** restores `config.h`. A direction change always pauses in the rest state for the dead time before the relays swap.
 
 ---
 
@@ -125,7 +136,14 @@ All commands are **JSON objects** with at least `"cmd": "<name>"`.
 |---------|---------|
 | `ping` | Keepalive; server replies with `pong` (used for latency). |
 | `move` | `dir`: `fwd`, `rev`, `stop` |
-| `steer` | `dir`: `left`, `right`, `center`; `pwm`: 0–255 |
+| `steer_angle` | `angle`: degrees. 0 and 180 are straight. Right increases the angle. |
+| `straight` | Hold the nearer of 0° or 180°. |
+| `recentre` | Drive to a stop, then back to 0°. |
+| `steer` | Old form. `dir` + `pwm` is converted to an angle. |
+| `get_calib` / `set_calib` / `calib_save` | Read, change, or store steering calibration. |
+| `calib_jog` | `dir`: `left` or `right`, `duration_ms`. `0` stops. |
+| `calib_measure_start` / `calib_measure_stop` | Time a run. Stop takes optional `span_deg`. |
+| `calib_set_centre` / `calib_reset_defaults` | Mark the current wheel as 0°, or restore defaults. |
 | `enable` | `state`: bool — motor enable |
 | `auto` | `state`: bool — auto mode |
 | `leds` | `nav`: bool — nav LEDs; optional `headlight`: bool |
@@ -135,7 +153,7 @@ All commands are **JSON objects** with at least `"cmd": "<name>"`.
 | `wifi_connect` | `ssid`: string, `pass`: string — connects ESP32 to shared Wi-Fi and persists in NVS. |
 | `wifi_reset` | Clears stored Wi-Fi credentials and switches back to SoftAP mode (`192.168.4.1`). |
 
-Telemetry is sent as JSON periodically (fields include `dist_cm`, `steering_pwm`, `drive_cmd`, `drive_enabled`, `auto_mode`, `nav_leds`, route step/total, `wifi_mode` ["ap"/"sta"], `wifi_ssid`, and `ip`).
+Telemetry is sent as JSON periodically (fields include `dist_cm`, `steer_angle`, `steer_dir`, `sensitivity`, `drive_cmd`, `drive_enabled`, `auto_mode`, `nav_leds`, route step/total, `wifi_mode` ["ap"/"sta"], `wifi_ssid`, and `ip`).
 
 ---
 

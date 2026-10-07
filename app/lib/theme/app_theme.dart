@@ -1,5 +1,4 @@
 import "package:flutter/material.dart";
-import "package:google_fonts/google_fonts.dart";
 
 /// Tactical HUD theme — all UI colors must reference these constants only.
 class AppTheme {
@@ -22,24 +21,24 @@ class AppTheme {
   /// Subtle glow tint (accent @ ~10% alpha) for panel washes.
   static const Color kGlow = Color(0x1A00C8FF);
 
-  static TextStyle displayNum(double size, {FontWeight? weight, Color? color}) =>
-      GoogleFonts.orbitron(
+  static TextStyle displayNum(double size, {FontWeight? weight, Color? color}) => TextStyle(
+        fontFamily: "Orbitron",
         fontSize: size,
         fontWeight: weight ?? FontWeight.w600,
         color: color ?? kTextNum,
         letterSpacing: 0.5,
       );
 
-  static TextStyle labelUi(double size, {FontWeight? weight, Color? color}) =>
-      GoogleFonts.exo2(
+  static TextStyle labelUi(double size, {FontWeight? weight, Color? color}) => TextStyle(
+        fontFamily: "Exo2",
         fontSize: size,
         fontWeight: weight ?? FontWeight.w500,
         color: color ?? kTextPri,
         letterSpacing: 0.4,
       );
 
-  static TextStyle monoData(double size, {FontWeight? weight, Color? color}) =>
-      GoogleFonts.shareTechMono(
+  static TextStyle monoData(double size, {FontWeight? weight, Color? color}) => TextStyle(
+        fontFamily: "ShareTechMono",
         fontSize: size,
         fontWeight: weight ?? FontWeight.w400,
         color: color ?? kTextNum,

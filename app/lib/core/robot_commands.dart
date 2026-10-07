@@ -2,8 +2,22 @@ class RobotCommands {
   const RobotCommands._();
 
   static Map<String, dynamic> move(String dir) => <String, dynamic>{"cmd": "move", "dir": dir};
-  static Map<String, dynamic> steer(String dir, int pwm) =>
-      <String, dynamic>{"cmd": "steer", "dir": dir, "pwm": pwm.clamp(0, 255)};
+  static Map<String, dynamic> steerAngle(double degrees) =>
+      <String, dynamic>{"cmd": "steer_angle", "angle": degrees};
+  static Map<String, dynamic> straight() => <String, dynamic>{"cmd": "straight"};
+  static Map<String, dynamic> recentre() => <String, dynamic>{"cmd": "recentre"};
+  static Map<String, dynamic> getCalib() => <String, dynamic>{"cmd": "get_calib"};
+  static Map<String, dynamic> setCalib(Map<String, dynamic> fields) =>
+      <String, dynamic>{"cmd": "set_calib", ...fields};
+  static Map<String, dynamic> calibJog(String dir, int durationMs) =>
+      <String, dynamic>{"cmd": "calib_jog", "dir": dir, "duration_ms": durationMs};
+  static Map<String, dynamic> calibMeasureStart(String dir) =>
+      <String, dynamic>{"cmd": "calib_measure_start", "dir": dir};
+  static Map<String, dynamic> calibMeasureStop(double spanDeg) =>
+      <String, dynamic>{"cmd": "calib_measure_stop", "span_deg": spanDeg};
+  static Map<String, dynamic> calibSetCentre() => <String, dynamic>{"cmd": "calib_set_centre"};
+  static Map<String, dynamic> calibSave() => <String, dynamic>{"cmd": "calib_save"};
+  static Map<String, dynamic> calibReset() => <String, dynamic>{"cmd": "calib_reset_defaults"};
   static Map<String, dynamic> enable(bool state) =>
       <String, dynamic>{"cmd": "enable", "state": state};
   static Map<String, dynamic> auto(bool state) => <String, dynamic>{"cmd": "auto", "state": state};

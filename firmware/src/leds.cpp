@@ -29,8 +29,8 @@ void ledsSetHeadlight(bool on) {
   s_headlightUser = on;
 }
 
-void ledsTick(uint32_t nowMs, bool navEnabled, SteerCmd steer, uint8_t steerPwm,
-              bool routeRecording, bool forceAllOff) {
+void ledsTick(uint32_t nowMs, bool navEnabled, SteerCmd steer, bool routeRecording,
+              bool forceAllOff) {
   if (forceAllOff) {
     ledWrite(PIN_LED_LEFT, false);
     ledWrite(PIN_LED_RIGHT, false);
@@ -44,7 +44,7 @@ void ledsTick(uint32_t nowMs, bool navEnabled, SteerCmd steer, uint8_t steerPwm,
   bool leftOn = false;
   bool rightOn = false;
 
-  if (navEnabled && steerPwm > 0) {
+  if (navEnabled && steer != SteerCmd::Center) {
     if (steer == SteerCmd::Left) {
       leftOn = blinkOn;
     } else if (steer == SteerCmd::Right) {

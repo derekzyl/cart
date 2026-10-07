@@ -1,3 +1,5 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 import "package:flutter_riverpod/flutter_riverpod.dart";
 
@@ -64,6 +66,17 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
     WifiSetupSheet.show(context);
   }
 
+  bool _turning(double angle) {
+    double a = angle % 360.0;
+    if (a < 0) {
+      a += 360.0;
+    }
+    final double to0 = a > 180.0 ? 360.0 - a : a;
+    final double to180 = (a - 180.0).abs();
+    final double nearest = to0 < to180 ? to0 : to180;
+    return nearest > 8.0;
+  }
+
   String _uptime(int s) {
     final int h = s ~/ 3600;
     final int m = (s % 3600) ~/ 60;
@@ -106,6 +119,10 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                             rateHz: settings.commandRateHz,
                             deadZonePx: settings.deadZonePx,
                             sensitivityOverride: settings.sensitivityOverride,
+                            holdSteer: settings.holdSteer,
+                            onHoldSteerChanged: (bool hold) {
+                              ref.read(settingsProvider.notifier).update(settings.copyWith(holdSteer: hold));
+                            },
                             autoMode: controls.auto,
                             enabled: controls.enabled,
                             telemetry: telemetry,
@@ -144,25 +161,28 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                               Expanded(
                                 flex: 7,
                                 child: SpeedControlsWidget(
-                                  onFwdDown: () async {
-                                    await controlNotifier.heavyHaptic();
+                                  onFwdDown: () {
+                                    controlNotifier.sendCommand(RobotCommands.straight());
                                     controlNotifier.sendCommand(RobotCommands.move("fwd"));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
-                                  onFwdUp: () async {
-                                    await controlNotifier.lightHaptic();
+                                  onFwdUp: () {
                                     controlNotifier.sendCommand(RobotCommands.move("stop"));
+                                    unawaited(controlNotifier.lightHaptic());
                                   },
-                                  onRevDown: () async {
-                                    await controlNotifier.heavyHaptic();
+                                  onRevDown: () {
+                                    controlNotifier.sendCommand(RobotCommands.straight());
                                     controlNotifier.sendCommand(RobotCommands.move("rev"));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
-                                  onRevUp: () async {
-                                    await controlNotifier.lightHaptic();
+                                  onRevUp: () {
                                     controlNotifier.sendCommand(RobotCommands.move("stop"));
+                                    unawaited(controlNotifier.lightHaptic());
                                   },
-                                  onStop: () async {
-                                    await controlNotifier.heavyHaptic();
+                                  onStop: () {
+                                    controlNotifier.sendCommand(RobotCommands.straight());
                                     controlNotifier.sendCommand(RobotCommands.move("stop"));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
                                 ),
                               ),
@@ -182,27 +202,27 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                               Expanded(
                                 child: RoutePanelWidget(
                                   state: route,
-                                  onRecordToggle: (String name) async {
-                                    await controlNotifier.heavyHaptic();
+                                  onRecordToggle: (String name) {
                                     final String action =
                                         route.state == RouteState.recording ? "record_stop" : "record_start";
                                     controlNotifier.sendCommand(RobotCommands.route(action, name: name));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
-                                  onPlayback: (String name) async {
-                                    await controlNotifier.heavyHaptic();
+                                  onPlayback: (String name) {
                                     controlNotifier.sendCommand(RobotCommands.route("playback", name: name));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
-                                  onReturn: (String name) async {
-                                    await controlNotifier.heavyHaptic();
+                                  onReturn: (String name) {
                                     controlNotifier.sendCommand(RobotCommands.route("playback_reverse", name: name));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
-                                  onStop: () async {
-                                    await controlNotifier.heavyHaptic();
+                                  onStop: () {
                                     controlNotifier.sendCommand(RobotCommands.route("stop"));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
-                                  onDelete: (String name) async {
-                                    await controlNotifier.heavyHaptic();
+                                  onDelete: (String name) {
                                     controlNotifier.sendCommand(RobotCommands.route("delete", name: name));
+                                    unawaited(controlNotifier.heavyHaptic());
                                   },
                                 ),
                               ),
@@ -213,7 +233,7 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                   navLeds: controls.navLeds,
                                   headlight: controls.headlight,
                                   buzzerMuted: controls.buzzerMuted,
-                                  steeringActive: telemetry.steerPwm > 12,
+                                  steeringActive: _turning(telemetry.steerAngle),
                                   onNavLeds: (bool v) => controlNotifier.sendCommand(RobotCommands.ledsNav(v)),
                                   onHeadlight: (bool v) => controlNotifier.sendCommand(RobotCommands.headlight(v)),
                                   onBuzzerMuted: (bool v) => controlNotifier.sendCommand(RobotCommands.buzzerMute(v)),

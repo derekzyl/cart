@@ -43,9 +43,21 @@ class ControlState {
       ControlState(auto: false, enabled: false, navLeds: false, headlight: false, buzzerMuted: false);
 }
 
+class _Latch {
+  _Latch(this.value, this.command);
+
+  final bool value;
+  final Map<String, dynamic> command;
+  final DateTime until = DateTime.now().add(const Duration(milliseconds: 1600));
+  bool resent = false;
+}
+
 class ControlNotifier extends StateNotifier<ControlState> {
-  DateTime? _manualEnableUntil;
-  DateTime? _manualAutoUntil;
+  _Latch? _enableLatch;
+  _Latch? _autoLatch;
+  _Latch? _navLatch;
+  _Latch? _lightLatch;
+  _Latch? _buzzLatch;
 
   ControlNotifier(this.ref, this.service) : super(ControlState.initial) {
     ref.listen(connectionProvider, (ConnectionUiState? _, ConnectionUiState next) {
@@ -55,17 +67,24 @@ class ControlNotifier extends StateNotifier<ControlState> {
     });
     ref.listen(telemetryProvider, (AsyncValue<Telemetry>? _, AsyncValue<Telemetry> next) {
       next.whenData((Telemetry telemetry) {
-        final DateTime now = DateTime.now();
-        final bool canUpdateEnable =
-            _manualEnableUntil == null || now.isAfter(_manualEnableUntil!);
-        final bool canUpdateAuto =
-            _manualAutoUntil == null || now.isAfter(_manualAutoUntil!);
         state = state.copyWith(
-          auto: canUpdateAuto ? telemetry.auto : state.auto,
-          enabled: canUpdateEnable ? telemetry.enabled : state.enabled,
-          navLeds: telemetry.navLeds,
-          headlight: telemetry.headlight,
-          buzzerMuted: telemetry.buzzerMuted,
+          auto: _apply(telemetry.auto, _autoLatch, (bool clear) => _autoLatch = clear ? null : _autoLatch),
+          enabled: _apply(
+            telemetry.enabled,
+            _enableLatch,
+            (bool clear) => _enableLatch = clear ? null : _enableLatch,
+          ),
+          navLeds: _apply(telemetry.navLeds, _navLatch, (bool clear) => _navLatch = clear ? null : _navLatch),
+          headlight: _apply(
+            telemetry.headlight,
+            _lightLatch,
+            (bool clear) => _lightLatch = clear ? null : _lightLatch,
+          ),
+          buzzerMuted: _apply(
+            telemetry.buzzerMuted,
+            _buzzLatch,
+            (bool clear) => _buzzLatch = clear ? null : _buzzLatch,
+          ),
         );
       });
     });
@@ -75,13 +94,47 @@ class ControlNotifier extends StateNotifier<ControlState> {
   final WebSocketService service;
   final Queue<Map<String, dynamic>> _queue = Queue<Map<String, dynamic>>();
 
+  bool _apply(bool telemetryValue, _Latch? latch, void Function(bool clear) write) {
+    if (latch == null) {
+      return telemetryValue;
+    }
+    if (telemetryValue == latch.value || DateTime.now().isAfter(latch.until)) {
+      write(true);
+      return telemetryValue == latch.value ? latch.value : telemetryValue;
+    }
+    final int ageMs = 1600 - latch.until.difference(DateTime.now()).inMilliseconds;
+    if (!latch.resent && ageMs > 400) {
+      latch.resent = true;
+      service.send(latch.command);
+    }
+    return latch.value;
+  }
+
   void sendCommand(Map<String, dynamic> command) {
-    if (command["cmd"] == "auto" && command["state"] is bool) {
-      state = state.copyWith(auto: command["state"] as bool);
-      _manualAutoUntil = DateTime.now().add(const Duration(milliseconds: 600));
-    } else if (command["cmd"] == "enable" && command["state"] is bool) {
-      state = state.copyWith(enabled: command["state"] as bool);
-      _manualEnableUntil = DateTime.now().add(const Duration(milliseconds: 600));
+    final String cmd = command["cmd"]?.toString() ?? "";
+    if (cmd == "auto" && command["state"] is bool) {
+      final bool value = command["state"] as bool;
+      state = state.copyWith(auto: value);
+      _autoLatch = _Latch(value, command);
+    } else if (cmd == "enable" && command["state"] is bool) {
+      final bool value = command["state"] as bool;
+      state = state.copyWith(enabled: value);
+      _enableLatch = _Latch(value, command);
+    } else if (cmd == "leds") {
+      if (command["nav"] is bool) {
+        final bool value = command["nav"] as bool;
+        state = state.copyWith(navLeds: value);
+        _navLatch = _Latch(value, command);
+      }
+      if (command["headlight"] is bool) {
+        final bool value = command["headlight"] as bool;
+        state = state.copyWith(headlight: value);
+        _lightLatch = _Latch(value, command);
+      }
+    } else if (cmd == "buzzer" && command["mute"] is bool) {
+      final bool value = command["mute"] as bool;
+      state = state.copyWith(buzzerMuted: value);
+      _buzzLatch = _Latch(value, command);
     }
     final ConnectionUiState connection = ref.read(connectionProvider);
     if (connection.status != ConnectionStatus.connected) {
