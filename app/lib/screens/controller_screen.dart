@@ -162,7 +162,6 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                 flex: 7,
                                 child: SpeedControlsWidget(
                                   onFwdDown: () {
-                                    controlNotifier.sendCommand(RobotCommands.straight());
                                     controlNotifier.sendCommand(RobotCommands.move("fwd"));
                                     unawaited(controlNotifier.heavyHaptic());
                                   },
@@ -171,7 +170,6 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                     unawaited(controlNotifier.lightHaptic());
                                   },
                                   onRevDown: () {
-                                    controlNotifier.sendCommand(RobotCommands.straight());
                                     controlNotifier.sendCommand(RobotCommands.move("rev"));
                                     unawaited(controlNotifier.heavyHaptic());
                                   },
@@ -180,7 +178,6 @@ class _ControllerScreenState extends ConsumerState<ControllerScreen> with Single
                                     unawaited(controlNotifier.lightHaptic());
                                   },
                                   onStop: () {
-                                    controlNotifier.sendCommand(RobotCommands.straight());
                                     controlNotifier.sendCommand(RobotCommands.move("stop"));
                                     unawaited(controlNotifier.heavyHaptic());
                                   },

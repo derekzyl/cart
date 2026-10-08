@@ -1,7 +1,8 @@
 name: cartbot
 description: CartBot ESP32 robot wireless controller
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.2+3
+
 
 environment:
   sdk: ^3.10.4

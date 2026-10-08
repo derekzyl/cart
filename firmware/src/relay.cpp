@@ -1,6 +1,7 @@
 // firmware/src/relay.cpp
 #include "relay.h"
 #include "config.h"
+#include "steer.h"
 
 void relayInit() {
   pinMode(PIN_RELAY_A, OUTPUT);
@@ -10,11 +11,19 @@ void relayInit() {
 }
 
 void driveForward() {
+  if (steerMotorBusy()) {
+    driveStop();
+    return;
+  }
   digitalWrite(PIN_RELAY_A, HIGH);
   digitalWrite(PIN_RELAY_B, LOW);
 }
 
 void driveReverse() {
+  if (steerMotorBusy()) {
+    driveStop();
+    return;
+  }
   digitalWrite(PIN_RELAY_A, LOW);
   digitalWrite(PIN_RELAY_B, HIGH);
 }
@@ -23,3 +32,4 @@ void driveStop() {
   digitalWrite(PIN_RELAY_A, LOW);
   digitalWrite(PIN_RELAY_B, LOW);
 }
+

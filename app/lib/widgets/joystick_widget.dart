@@ -49,6 +49,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   String? _lastSteer;
   int? _lastPwm;
   String? _lastMove;
+  double? _lastSteerAngle;
   DateTime _lastDriveSent = DateTime.fromMillisecondsSinceEpoch(0);
   late final AnimationController _releaseCtrl;
   Animation<Offset>? _releaseAnim;
@@ -78,27 +79,36 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
   }
 
   void _emitDrive(String steer, int pwm, String move) {
-    final bool steerChanged = steer != _lastSteer || pwm != _lastPwm;
+    final double signed = steer == "left" ? -1.0 : (steer == "right" ? 1.0 : 0.0);
+    final double angle = steer == "center"
+        ? 0.0
+        : (signed * (pwm / 255.0) * 30.0 * widget.sensitivityOverride).clamp(-30.0, 30.0);
+
+    final bool dirChanged = steer != _lastSteer;
+    final bool angleShift8Deg = _lastSteerAngle == null ||
+        (angle - _lastSteerAngle!).abs() >= 8.0;
+    final bool steerChanged = dirChanged || (steer != "center" && angleShift8Deg);
     final bool moveChanged = move != _lastMove;
     final bool heartbeat =
         DateTime.now().difference(_lastDriveSent) >= const Duration(milliseconds: 800);
+
     if (!steerChanged && !moveChanged && !heartbeat) {
       return;
     }
+
     if (steerChanged) {
       _lastSteer = steer;
       _lastPwm = pwm;
+      _lastSteerAngle = angle;
       if (steer == "center" || pwm == 0) {
+        widget.onCommand(RobotCommands.steer("center", 0));
         widget.onCommand(RobotCommands.straight());
       } else {
-        // Left side sends a negative angle. Right side sends a positive angle.
-        // Full stick is the ±30° lock. Pure forward and reverse send no steer.
-        final double signed = steer == "left" ? -1.0 : 1.0;
-        final double angle =
-            (signed * (pwm / 255.0) * 30.0 * widget.sensitivityOverride).clamp(-30.0, 30.0);
+        widget.onCommand(RobotCommands.steer(steer, pwm));
         widget.onCommand(RobotCommands.steerAngle(angle));
       }
     }
+
     if (moveChanged || heartbeat) {
       _lastMove = move;
       _lastDriveSent = DateTime.now();
@@ -226,9 +236,11 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     widget.onCommand(RobotCommands.move("stop"));
     _lastMove = "stop";
     _lastDriveSent = DateTime.now();
+    widget.onCommand(RobotCommands.steer("center", 0));
     widget.onCommand(RobotCommands.straight());
     _lastSteer = "center";
     _lastPwm = 0;
+    _lastSteerAngle = 0.0;
     final Offset start = _offset;
     _releaseCtrl.reset();
     // easeOut stays on the same side of center. elasticOut crosses to the
@@ -244,6 +256,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
           _offset = Offset.zero;
         });
       }
+      widget.onCommand(RobotCommands.steer("center", 0));
       widget.onCommand(RobotCommands.straight());
       widget.onCommand(RobotCommands.move("stop"));
     });

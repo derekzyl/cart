@@ -1,4 +1,5 @@
 #include "steer.h"
+#include "relay.h"
 
 #include <Preferences.h>
 #include <math.h>
@@ -43,7 +44,7 @@ static MoveFsm s_fsm = MoveFsm::Idle;
 static MoveFsm s_afterDead = MoveFsm::Idle;
 static HomeFsm s_home = HomeFsm::None;
 static bool s_enabled = false;
-static bool s_bootHome = true;
+static bool s_bootHome = false;
 static bool s_measuring = false;
 static bool s_measureRight = true;
 static uint32_t s_measureStart = 0;
@@ -231,12 +232,14 @@ static void steerRest() {
 }
 
 static void steerRight() {
+  driveStop();
   // The pin named LEFT turns this wheel to the right.
   writeRelay(PIN_STEER_RELAY_RIGHT, false);
   writeRelay(PIN_STEER_RELAY_LEFT, true);
 }
 
 static void steerLeft() {
+  driveStop();
   writeRelay(PIN_STEER_RELAY_RIGHT, true);
   writeRelay(PIN_STEER_RELAY_LEFT, false);
 }
@@ -657,9 +660,10 @@ void steerInit() {
   pinMode(PIN_STEER_RELAY_LEFT, OUTPUT);
   steerRest();
   s_enabled = false;
-  s_bootHome = true;
+  s_bootHome = false;
   s_fsm = MoveFsm::Idle;
   s_mech = 0.0f;
+  s_sideMs = 0;
   s_angle = wrap360(0.0f - s_cal.centreTrimDeg);
 }
 
@@ -672,12 +676,7 @@ void steerSetEnabled(bool enabled) {
     s_enabled = false;
     return;
   }
-  const bool was = s_enabled;
   s_enabled = true;
-  if (!was && s_bootHome) {
-    s_bootHome = false;
-    beginHome(millis());
-  }
 }
 
 void steerSetCommandScale(float fraction) {
@@ -700,7 +699,12 @@ void steerCommandAngle(float deg, bool scalePot) {
 }
 
 void steerStraight() {
-  queue(Pending::Straight, 0.0f, true, 0, 0.0f);
+  steerRest();
+  s_fsm = MoveFsm::Idle;
+  s_home = HomeFsm::None;
+  s_mech = 0.0f;
+  s_sideMs = 0;
+  setShown(0.0f);
 }
 
 void steerRecentre() {
@@ -824,11 +828,8 @@ void steerTick(uint32_t now) {
         const float stored = wrap360(shownTarget - s_cal.centreTrimDeg);
         const uint32_t pulse = static_cast<uint32_t>(fabsf(mechDelta) / rate * 1000.0f);
         if (s_fsm == dir) {
-          s_sideAtStart = s_sideMs;
-          s_phaseStart = now;
-          s_committed = mechDelta;
-          s_commitMs = pulse == 0 ? 1 : pulse;
-          s_target = stored;
+          // Already moving in this direction — let current move complete.
+          return;
         } else if (s_fsm == MoveFsm::MovingRight || s_fsm == MoveFsm::MovingLeft) {
           beginDead(now, dir, stored, mechDelta);
           s_commitMs = pulse == 0 ? 1 : pulse;
@@ -850,10 +851,8 @@ void steerTick(uint32_t now) {
           integrate(now);
           beginDead(now, dir, wrap360(s_angle + delta), delta);
         } else {
-          s_angleAtStart = s_angle;
-          s_phaseStart = now;
-          s_committed = delta;
-          s_target = wrap360(s_angle + delta);
+          // Already moving in this direction — let current move complete.
+          return;
         }
       } else if (s_fsm != MoveFsm::DeadTime) {
         startMove(now, dir, wrap360(s_angle + delta), delta);
@@ -963,7 +962,29 @@ bool steerHandleCommand(JsonDocument &doc, JsonDocument &reply) {
   const char *cmd = doc["cmd"] | "";
   bool respond = false;
   if (strcmp(cmd, "steer_angle") == 0) {
-    steerCommandAngle(doc["angle"] | 0.0f, true);
+    const float angle = doc["angle"] | 0.0f;
+    if (fabsf(angle) <= s_cal.straightDeadbandDeg) {
+      steerStraight();
+    } else {
+      const float lock = lockDeg() < 1.0f ? 30.0f : lockDeg();
+      const float targetAngle = angle > lock ? lock : (angle < -lock ? -lock : angle);
+      const float currentAngle = s_mech;
+      const float delta = targetAngle - currentAngle;
+      const bool targetRight = targetAngle > 0.0f;
+      const bool currentRight = currentAngle > 0.0f;
+      const bool sideChanged = (targetRight != currentRight) && (fabsf(currentAngle) > s_cal.straightDeadbandDeg);
+
+      if (s_fsm == (targetRight ? MoveFsm::MovingRight : MoveFsm::MovingLeft)) {
+        // Move in progress in same direction, let it complete
+      } else if (sideChanged || fabsf(delta) >= STEER_MIN_MOVE_DEG) {
+        // Direction changed or angle shifted by at least 8 degrees!
+        const float rate = targetRight ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
+        const uint32_t pulseMs = static_cast<uint32_t>((fabsf(delta) / (rate > 1.0f ? rate : 200.0f)) * 1000.0f);
+        const uint32_t cap = s_cal.fullTravelMs;
+        const uint32_t dur = (pulseMs > cap) ? cap : (pulseMs == 0 ? 20 : pulseMs);
+        queue(Pending::Jog, 0.0f, targetRight, dur, 0.0f);
+      }
+    }
   } else if (strcmp(cmd, "straight") == 0) {
     steerStraight();
   } else if (strcmp(cmd, "recentre") == 0) {
@@ -1036,8 +1057,25 @@ bool steerHandleCommand(JsonDocument &doc, JsonDocument &reply) {
     if (strcmp(dir, "center") == 0 || pwm <= 0.0f) {
       steerStraight();
     } else {
-      const float mag = (pwm / 255.0f) * 180.0f;
-      steerCommandAngle(strcmp(dir, "left") == 0 ? wrap360(-mag) : mag, true);
+      const bool wantRight = (strcmp(dir, "right") == 0);
+      const bool isCurrentlyRight = (s_mech > s_cal.straightDeadbandDeg);
+      const bool isCurrentlyLeft = (s_mech < -s_cal.straightDeadbandDeg);
+      const bool alreadyThere = (wantRight && isCurrentlyRight && s_fsm == MoveFsm::Idle) ||
+                                (!wantRight && isCurrentlyLeft && s_fsm == MoveFsm::Idle);
+      const bool alreadyMoving = (s_fsm == (wantRight ? MoveFsm::MovingRight : MoveFsm::MovingLeft));
+
+      if (alreadyThere || alreadyMoving) {
+        // Already at destination or already moving in that direction: do not re-trigger!
+      } else {
+        const float lock = lockDeg() < 1.0f ? 30.0f : lockDeg();
+        const float targetAngle = wantRight ? lock : -lock;
+        const float delta = targetAngle - s_mech;
+        const float rate = wantRight ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
+        const uint32_t pulseMs = static_cast<uint32_t>((fabsf(delta) / (rate > 1.0f ? rate : 200.0f)) * 1000.0f);
+        const uint32_t cap = s_cal.fullTravelMs;
+        const uint32_t dur = (pulseMs > cap) ? cap : (pulseMs == 0 ? 20 : pulseMs);
+        queue(Pending::Jog, 0.0f, wantRight, dur, 0.0f);
+      }
     }
   }
   if (respond) {

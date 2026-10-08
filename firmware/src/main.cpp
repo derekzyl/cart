@@ -167,7 +167,7 @@ static void onButton2Pressed() {
 }
 
 static void relayForwardPercent(uint8_t percent, uint32_t nowMs, bool active) {
-  if (!active || percent == 0) {
+  if (steerMotorBusy() || !active || percent == 0) {
     driveStop();
     s_fwdPctWindowStart = 0;
     return;
@@ -191,6 +191,10 @@ static void relayForwardPercent(uint8_t percent, uint32_t nowMs, bool active) {
 }
 
 static void applyManualDrive(DriveCmd d) {
+  if (steerMotorBusy()) {
+    driveStop();
+    return;
+  }
   switch (d) {
     case DriveCmd::Forward:
       driveForward();
@@ -416,8 +420,8 @@ static void taskControlCore1(void *param) {
     }
 
     steerTick(now);
-    // Steering and drive share the battery. While the wheel is shifting,
-    // the forward/reverse relay stays off, then drive resumes.
+    // Drive and steer motors cannot be on at the same time (power efficiency).
+    // During any L-R steering action, drive stays off until steering stops.
     if (steerMotorBusy()) {
       driveStop();
       s_fwdPctWindowStart = 0;

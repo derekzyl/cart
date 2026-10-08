@@ -2,6 +2,8 @@ class RobotCommands {
   const RobotCommands._();
 
   static Map<String, dynamic> move(String dir) => <String, dynamic>{"cmd": "move", "dir": dir};
+  static Map<String, dynamic> steer(String dir, int pwm) =>
+      <String, dynamic>{"cmd": "steer", "dir": dir, "pwm": pwm};
   static Map<String, dynamic> steerAngle(double degrees) =>
       <String, dynamic>{"cmd": "steer_angle", "angle": degrees};
   static Map<String, dynamic> straight() => <String, dynamic>{"cmd": "straight"};
