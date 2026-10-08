@@ -1,4 +1,4 @@
-package com.example.app
+package com.cybergenii.cartbot
 
 import android.content.Context
 import android.net.ConnectivityManager

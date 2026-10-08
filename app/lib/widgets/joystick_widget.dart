@@ -80,14 +80,14 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
 
   void _emitDrive(String steer, int pwm, String move) {
     final double signed = steer == "left" ? -1.0 : (steer == "right" ? 1.0 : 0.0);
-    final double angle = steer == "center"
-        ? 0.0
-        : (signed * (pwm / 255.0) * 30.0 * widget.sensitivityOverride).clamp(-30.0, 30.0);
+    final double angle = (steer == "left" || steer == "right")
+        ? (signed * (pwm / 255.0) * 30.0 * widget.sensitivityOverride).clamp(-30.0, 30.0)
+        : 0.0;
 
     final bool dirChanged = steer != _lastSteer;
     final bool angleShift8Deg = _lastSteerAngle == null ||
         (angle - _lastSteerAngle!).abs() >= 8.0;
-    final bool steerChanged = dirChanged || (steer != "center" && angleShift8Deg);
+    final bool steerChanged = dirChanged || ((steer == "left" || steer == "right") && angleShift8Deg);
     final bool moveChanged = move != _lastMove;
     final bool heartbeat =
         DateTime.now().difference(_lastDriveSent) >= const Duration(milliseconds: 800);
@@ -100,13 +100,10 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
       _lastSteer = steer;
       _lastPwm = pwm;
       _lastSteerAngle = angle;
-      if (steer == "center" || pwm == 0) {
-        widget.onCommand(RobotCommands.steer("center", 0));
-        widget.onCommand(RobotCommands.straight());
-      } else {
+      if (steer == "left" || steer == "right") {
         widget.onCommand(RobotCommands.steer(steer, pwm));
-        widget.onCommand(RobotCommands.steerAngle(angle));
       }
+      // If steer is "none", no steering command is dispatched (normal car behavior).
     }
 
     if (moveChanged || heartbeat) {
@@ -177,36 +174,45 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     }
 
     // Straight deadbands around pure forward (0°) and pure reverse (180°)
-    const double straightBand = 14.0;
+    // Generous deadband prevents thumb jitter from triggering steering relays during straight drive.
+    const double straightBand = 28.0;
     final bool isStraightFwd = heading <= straightBand || heading >= (360.0 - straightBand);
     final bool isStraightRev = (heading - 180.0).abs() <= straightBand;
 
-    String steer = "center";
+    String steer = "none";
     String move = "stop";
-
-    if (ny > 0.10) {
-      move = "fwd";
-    } else if (ny < -0.10) {
-      move = "rev";
-    }
 
     if (isStraightFwd) {
       move = "fwd";
-      steer = "center";
+      steer = "none";
     } else if (isStraightRev) {
       move = "rev";
-      steer = "center";
+      steer = "none";
     } else if (heading > straightBand && heading < (180.0 - straightBand)) {
       // 0° to 90° (fwd-r) and 90° to 180° (r-rev) -> steer RIGHT
       steer = "right";
+      if (heading < 90.0) {
+        move = "fwd";
+      } else if (heading > 90.0) {
+        move = "rev";
+      } else {
+        move = _moveFor(ny);
+      }
     } else if (heading > (180.0 + straightBand) && heading < (360.0 - straightBand)) {
       // 180° to 270° (rev-l) and 270° to 360° (l-fwd) -> steer LEFT
       steer = "left";
+      if (heading < 270.0) {
+        move = "rev";
+      } else if (heading > 270.0) {
+        move = "fwd";
+      } else {
+        move = _moveFor(ny);
+      }
     }
 
     // Lateral displacement controls steer strength (0 along straight axis, max at 90° / 270°)
     final double lateral = math.sin(heading * math.pi / 180.0).abs() * normDist;
-    final int pwm = steer == "center" ? 0 : (lateral * 255).round().clamp(0, 255);
+    final int pwm = steer == "none" ? 0 : (lateral * 255).round().clamp(0, 255);
 
     _emitDrive(steer, pwm, move);
   }
@@ -236,9 +242,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
     widget.onCommand(RobotCommands.move("stop"));
     _lastMove = "stop";
     _lastDriveSent = DateTime.now();
-    widget.onCommand(RobotCommands.steer("center", 0));
-    widget.onCommand(RobotCommands.straight());
-    _lastSteer = "center";
+    _lastSteer = "none";
     _lastPwm = 0;
     _lastSteerAngle = 0.0;
     final Offset start = _offset;
@@ -256,8 +260,6 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
           _offset = Offset.zero;
         });
       }
-      widget.onCommand(RobotCommands.steer("center", 0));
-      widget.onCommand(RobotCommands.straight());
       widget.onCommand(RobotCommands.move("stop"));
     });
   }
@@ -299,21 +301,53 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
           ],
         ),
         const SizedBox(height: 6),
-        GestureDetector(
-          onTap: () => widget.onHoldSteerChanged(!widget.holdSteer),
-          child: ClippedCornerBox(
-            cutSize: 4,
-            backgroundColor: widget.holdSteer ? AppTheme.kWarn.withValues(alpha: 0.22) : AppTheme.kDim,
-            borderColor: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent,
-            topAccentColor: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Center(
-              child: Text(
-                widget.holdSteer ? "HOLD ON" : "HOLD OFF",
-                style: AppTheme.labelUi(12, color: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: GestureDetector(
+                onTap: () => widget.onHoldSteerChanged(!widget.holdSteer),
+                child: ClippedCornerBox(
+                  cutSize: 4,
+                  backgroundColor: widget.holdSteer ? AppTheme.kWarn.withValues(alpha: 0.22) : AppTheme.kDim,
+                  borderColor: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent,
+                  topAccentColor: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Center(
+                    child: Text(
+                      widget.holdSteer ? "HOLD ON" : "HOLD OFF",
+                      style: AppTheme.labelUi(11, color: widget.holdSteer ? AppTheme.kWarn : AppTheme.kAccent),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => widget.onCommand(RobotCommands.recentre()),
+                child: ClippedCornerBox(
+                  cutSize: 4,
+                  backgroundColor: AppTheme.kDim,
+                  borderColor: AppTheme.kGo,
+                  topAccentColor: AppTheme.kGo,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(Icons.center_focus_strong, size: 13, color: AppTheme.kGo),
+                        const SizedBox(width: 4),
+                        Text(
+                          "CENTER",
+                          style: AppTheme.labelUi(11, color: AppTheme.kGo, weight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
         Expanded(
           child: LayoutBuilder(
@@ -324,6 +358,7 @@ class _JoystickWidgetState extends State<JoystickWidget> with SingleTickerProvid
                   widget.telemetry.routeState == RouteState.playingReverse;
               final Offset shown = playing && _offset.distance < 0.5 ? _playbackOffset(maxR) : _offset;
               return GestureDetector(
+                onDoubleTap: () => widget.onCommand(RobotCommands.recentre()),
                 onPanDown: (DragDownDetails d) => _onDrag(d.localPosition, area),
                 onPanUpdate: (DragUpdateDetails d) => _onDrag(d.localPosition, area),
                 onPanEnd: (_) => _finishDrag(),

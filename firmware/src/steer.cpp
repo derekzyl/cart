@@ -804,6 +804,7 @@ void steerTick(uint32_t now) {
     } else if (mapMech()) {
       integrate(now);
       const float rate = right ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
+      const MoveFsm dir = right ? MoveFsm::MovingRight : MoveFsm::MovingLeft;
       const float delta = (right ? 1.0f : -1.0f) * rate * (static_cast<float>(ms) / 1000.0f);
       float goal = s_mech + delta;
       const float lock = lockDeg();
@@ -813,34 +814,25 @@ void steerTick(uint32_t now) {
       if (goal < -lock) {
         goal = -lock;
       }
-      const float mechDelta = goal - s_mech;
       const float shownTarget = shownFromMech(goal);
-      if (fabsf(mechDelta) <= 0.2f) {
-        steerRest();
-        s_fsm = MoveFsm::Idle;
-        s_mech = goal;
-        setShown(shownTarget);
+      s_shownTarget = shownTarget;
+      s_shownAtStart = shownAngle();
+      s_mechAtStart = s_mech;
+      const float stored = wrap360(shownTarget - s_cal.centreTrimDeg);
+      const uint32_t pulse = ms == 0 ? 1 : ms;
+      if (s_fsm == dir) {
+        // Already moving in this direction — let current move complete.
+        return;
+      } else if (s_fsm == MoveFsm::MovingRight || s_fsm == MoveFsm::MovingLeft) {
+        beginDead(now, dir, stored, delta);
+        s_commitMs = pulse;
+      } else if (s_fsm != MoveFsm::DeadTime) {
+        startMove(now, dir, stored, delta, pulse);
       } else {
-        const MoveFsm dir = mechDelta > 0.0f ? MoveFsm::MovingRight : MoveFsm::MovingLeft;
-        s_shownTarget = shownTarget;
-        s_shownAtStart = shownAngle();
-        s_mechAtStart = s_mech;
-        const float stored = wrap360(shownTarget - s_cal.centreTrimDeg);
-        const uint32_t pulse = static_cast<uint32_t>(fabsf(mechDelta) / rate * 1000.0f);
-        if (s_fsm == dir) {
-          // Already moving in this direction — let current move complete.
-          return;
-        } else if (s_fsm == MoveFsm::MovingRight || s_fsm == MoveFsm::MovingLeft) {
-          beginDead(now, dir, stored, mechDelta);
-          s_commitMs = pulse == 0 ? 1 : pulse;
-        } else if (s_fsm != MoveFsm::DeadTime) {
-          startMove(now, dir, stored, mechDelta, pulse == 0 ? 1 : pulse);
-        } else {
-          s_target = stored;
-          s_committed = mechDelta;
-          s_commitMs = pulse == 0 ? 1 : pulse;
-          s_afterDead = dir;
-        }
+        s_target = stored;
+        s_committed = delta;
+        s_commitMs = pulse;
+        s_afterDead = dir;
       }
     } else {
       const float rate = right ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
@@ -970,19 +962,20 @@ bool steerHandleCommand(JsonDocument &doc, JsonDocument &reply) {
       const float targetAngle = angle > lock ? lock : (angle < -lock ? -lock : angle);
       const float currentAngle = s_mech;
       const float delta = targetAngle - currentAngle;
+      const bool wantRight = delta > 0.0f;
       const bool targetRight = targetAngle > 0.0f;
       const bool currentRight = currentAngle > 0.0f;
       const bool sideChanged = (targetRight != currentRight) && (fabsf(currentAngle) > s_cal.straightDeadbandDeg);
 
-      if (s_fsm == (targetRight ? MoveFsm::MovingRight : MoveFsm::MovingLeft)) {
+      if (s_fsm == (wantRight ? MoveFsm::MovingRight : MoveFsm::MovingLeft)) {
         // Move in progress in same direction, let it complete
       } else if (sideChanged || fabsf(delta) >= STEER_MIN_MOVE_DEG) {
         // Direction changed or angle shifted by at least 8 degrees!
-        const float rate = targetRight ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
+        const float rate = wantRight ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
         const uint32_t pulseMs = static_cast<uint32_t>((fabsf(delta) / (rate > 1.0f ? rate : 200.0f)) * 1000.0f);
         const uint32_t cap = s_cal.fullTravelMs;
         const uint32_t dur = (pulseMs > cap) ? cap : (pulseMs == 0 ? 20 : pulseMs);
-        queue(Pending::Jog, 0.0f, targetRight, dur, 0.0f);
+        queue(Pending::Jog, 0.0f, wantRight, dur, 0.0f);
       }
     }
   } else if (strcmp(cmd, "straight") == 0) {
@@ -1054,26 +1047,17 @@ bool steerHandleCommand(JsonDocument &doc, JsonDocument &reply) {
   } else if (strcmp(cmd, "steer") == 0) {
     const char *dir = doc["dir"] | "center";
     const float pwm = static_cast<float>(doc["pwm"] | 0);
-    if (strcmp(dir, "center") == 0 || pwm <= 0.0f) {
+    if (strcmp(dir, "center") == 0 || strcmp(dir, "none") == 0 || pwm <= 0.0f) {
       steerStraight();
     } else {
       const bool wantRight = (strcmp(dir, "right") == 0);
-      const bool isCurrentlyRight = (s_mech > s_cal.straightDeadbandDeg);
-      const bool isCurrentlyLeft = (s_mech < -s_cal.straightDeadbandDeg);
-      const bool alreadyThere = (wantRight && isCurrentlyRight && s_fsm == MoveFsm::Idle) ||
-                                (!wantRight && isCurrentlyLeft && s_fsm == MoveFsm::Idle);
-      const bool alreadyMoving = (s_fsm == (wantRight ? MoveFsm::MovingRight : MoveFsm::MovingLeft));
-
-      if (alreadyThere || alreadyMoving) {
-        // Already at destination or already moving in that direction: do not re-trigger!
+      if (s_fsm == (wantRight ? MoveFsm::MovingRight : MoveFsm::MovingLeft)) {
+        // Already moving in this direction: let current move complete!
       } else {
-        const float lock = lockDeg() < 1.0f ? 30.0f : lockDeg();
-        const float targetAngle = wantRight ? lock : -lock;
-        const float delta = targetAngle - s_mech;
-        const float rate = wantRight ? s_cal.rightDegPerSec : s_cal.leftDegPerSec;
-        const uint32_t pulseMs = static_cast<uint32_t>((fabsf(delta) / (rate > 1.0f ? rate : 200.0f)) * 1000.0f);
+        // Driving to a side requires a full stroke to ensure reaching the mechanical stop cleanly.
+        // Even if the wheels were at the opposite stop, full travel (fullTravelMs) sweeps all the way across.
         const uint32_t cap = s_cal.fullTravelMs;
-        const uint32_t dur = (pulseMs > cap) ? cap : (pulseMs == 0 ? 20 : pulseMs);
+        const uint32_t dur = cap > 0 ? cap : 240;
         queue(Pending::Jog, 0.0f, wantRight, dur, 0.0f);
       }
     }
